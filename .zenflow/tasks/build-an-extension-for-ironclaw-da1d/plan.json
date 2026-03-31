@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "id": "ff6d0d62-856e-4047-b2d8-d322aa8432bd",
+      "name": "Project Scaffolding & API Discovery",
+      "description": "Set up Rust WASM project structure (Cargo.toml, capabilities.json, WIT file, src/lib.rs skeleton). Discover/confirm Zencoder HTTP API endpoints. Verify cargo check passes.",
+      "status": "Pending",
+      "sort_order": 0,
+      "start_new_chat": false,
+      "stop_after_completion": false,
+      "created_at": "2026-03-30T10:28:57.531415Z",
+      "updated_at": "2026-03-30T10:28:57.531415Z"
+    },
+    {
+      "id": "52fce216-9013-4c76-8b78-42979b7524b5",
+      "name": "Core Infrastructure & Validation",
+      "description": "Implement constants, all validation helpers (UUID, length, status, schedule), URL encoding, ZencoderAction enum (17 variants), supporting types, api_request() with retry logic, Tool trait impl (execute dispatcher, schema placeholder, description). Unit tests for all validation/encoding functions.",
+      "status": "Pending",
+      "sort_order": 1,
+      "start_new_chat": false,
+      "stop_after_completion": false,
+      "created_at": "2026-03-30T10:28:57.531415Z",
+      "updated_at": "2026-03-30T10:28:57.531415Z"
+    },
+    {
+      "id": "71ce2063-1607-4e4c-9942-3db0b3a31868",
+      "name": "Action Handlers — Projects, Tasks & Workflows",
+      "description": "Implement 7 handler functions: list_projects, get_project, create_task, list_tasks, get_task, update_task, list_workflows. Wire into execute() match arms. Each validates inputs, builds API path, calls api_request().",
+      "status": "Pending",
+      "sort_order": 2,
+      "start_new_chat": false,
+      "stop_after_completion": false,
+      "created_at": "2026-03-30T10:28:57.531415Z",
+      "updated_at": "2026-03-30T10:28:57.531415Z"
+    },
+    {
+      "id": "98204fe5-9d21-4925-a377-067291a6eeb8",
+      "name": "Action Handlers — Plans & Automations",
+      "description": "Implement 8 handler functions: get_plan, create_plan, update_plan_step, add_plan_steps, list_automations, create_automation, toggle_automation, list_task_automations. Wire into execute() match arms.",
+      "status": "Pending",
+      "sort_order": 3,
+      "start_new_chat": false,
+      "stop_after_completion": false,
+      "created_at": "2026-03-30T10:28:57.531415Z",
+      "updated_at": "2026-03-30T10:28:57.531415Z"
+    },
+    {
+      "id": "39d89e9b-a495-4b56-989a-439ce84f646e",
+      "name": "Convenience Actions, JSON Schema & Comprehensive Tests",
+      "description": "Implement derive_title, solve_coding_problem, check_solution_status convenience actions. Complete SCHEMA const (oneOf for all 17 actions). Comprehensive unit tests for derive_title and all action deserialization.",
+      "status": "Pending",
+      "sort_order": 4,
+      "start_new_chat": false,
+      "stop_after_completion": false,
+      "created_at": "2026-03-30T10:28:57.531415Z",
+      "updated_at": "2026-03-30T10:28:57.531415Z"
+    },
+    {
+      "id": "60bba233-22a6-4cd9-83ca-c0970da50e0f",
+      "name": "Build Verification & Security Review",
+      "description": "Run cargo fmt --check, cargo clippy, cargo test, cargo build --target wasm32-wasip1 --release. Check WASM binary size. Verify security checklist (no secrets in WASM, UUID validation, length bounds, URL encoding, allowlist, no DELETE, rate limits, safe errors, no unsafe, no panics).",
+      "status": "Pending",
+      "sort_order": 5,
+      "start_new_chat": false,
+      "stop_after_completion": false,
+      "created_at": "2026-03-30T10:28:57.531415Z",
+      "updated_at": "2026-03-30T10:28:57.531415Z"
+    }
+  ]
+}

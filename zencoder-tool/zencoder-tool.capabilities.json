@@ -1,0 +1,48 @@
+{
+  "version": "0.2.1",
+  "wit_version": "0.3.0",
+  "description": "Manage Zencoder/Zenflow projects, tasks, plans, workflows, and automations. Delegate complex coding problems to Zenflow's AI agents and track their progress.",
+  "capabilities": {
+    "http": {
+      "allowlist": [
+        {
+          "host": "api.zencoder.ai",
+          "path_prefix": "/api/v1/",
+          "methods": ["GET", "POST", "PATCH"]
+        }
+      ],
+      "credentials": {
+        "zencoder_api_key": {
+          "secret_name": "zencoder_api_key",
+          "location": {
+            "type": "bearer"
+          },
+          "host_patterns": ["api.zencoder.ai"]
+        }
+      },
+      "rate_limit": {
+        "requests_per_minute": 60,
+        "requests_per_hour": 1000
+      }
+    },
+    "secrets": {
+      "allowed_names": ["zencoder_api_key"]
+    }
+  },
+  "auth": {
+    "secret_name": "zencoder_api_key",
+    "display_name": "Zencoder",
+    "instructions": "Get your Zencoder API key from the Zencoder dashboard (Settings > API Keys), then paste it here.",
+    "setup_url": "https://app.zencoder.ai/settings",
+    "token_hint": "Starts with 'zen_'",
+    "env_var": "ZENCODER_API_KEY"
+  },
+  "setup": {
+    "required_secrets": [
+      {
+        "name": "zencoder_api_key",
+        "prompt": "Zencoder API Key (get one from app.zencoder.ai/settings)"
+      }
+    ]
+  }
+}
