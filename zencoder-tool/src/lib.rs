@@ -9,7 +9,7 @@ const MAX_TEXT_LENGTH: usize = 65536;
 const API_BASE_URL: &str = "https://api.zencoder.ai";
 
 fn validate_input_length(s: &str, field_name: &str) -> Result<(), String> {
-    if s.len() > MAX_TEXT_LENGTH && s.chars().count() > MAX_TEXT_LENGTH {
+    if s.chars().count() > MAX_TEXT_LENGTH {
         return Err(format!(
             "Input '{}' exceeds maximum length of {} characters",
             field_name, MAX_TEXT_LENGTH
@@ -385,11 +385,6 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                     near::agent::host::log(near::agent::host::LogLevel::Warn, &msg);
                     continue;
                 } else {
-                    let body_str = String::from_utf8_lossy(&resp.body);
-                    near::agent::host::log(
-                        near::agent::host::LogLevel::Warn,
-                        &format!("Zencoder API {} body: {}", resp.status, body_str),
-                    );
                     return Err(format!(
                         "Zencoder API returned status {}. Check your API key and parameters.",
                         resp.status
@@ -469,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_validate_uuid_wrong_segments() {
-        assert!(validate_uuid("550e8400e29b-41d4-a716-446655440000", "test").is_err());
+        assert!(validate_uuid("aaaaaaaaa-aaaaaaaaa-aaaaaaaaa-aaaaaa", "test").is_err());
     }
 
     #[test]

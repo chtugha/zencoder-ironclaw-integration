@@ -65,7 +65,8 @@ Set up the Rust WASM project structure and discover/confirm the Zencoder HTTP AP
 - [ ] Ensure `.gitignore` includes `target/`, `*.wasm`, and other Rust build artifacts
 - [ ] Verify: `cargo check --target wasm32-wasip1` succeeds with the empty scaffolding
 
-### [ ] Step: Core Infrastructure & Validation
+### [x] Step: Core Infrastructure & Validation
+<!-- chat-id: d50bc7f8-a9eb-4506-8bfa-a7ffbdc77184 -->
 
 Implement the foundational code in `zencoder-tool/src/lib.rs`: constants, all validation helpers, URL encoding, the API client function, the `ZencoderAction` enum definition (all 17 variants), supporting types, and the `Tool` trait implementation (execute dispatcher, schema placeholder, description). Include unit tests for all validation and encoding functions.
 
