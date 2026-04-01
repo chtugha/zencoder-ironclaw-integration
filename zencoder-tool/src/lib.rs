@@ -418,13 +418,32 @@ fn execute_inner(params: &str) -> Result<String, String> {
         serde_json::from_str(params).map_err(|e| format!("Invalid parameters: {}", e))?;
 
     match action {
-        ZencoderAction::ListProjects => stub("list_projects"),
-        ZencoderAction::GetProject { .. } => stub("get_project"),
-        ZencoderAction::CreateTask { .. } => stub("create_task"),
-        ZencoderAction::ListTasks { .. } => stub("list_tasks"),
-        ZencoderAction::GetTask { .. } => stub("get_task"),
-        ZencoderAction::UpdateTask { .. } => stub("update_task"),
-        ZencoderAction::ListWorkflows { .. } => stub("list_workflows"),
+        ZencoderAction::ListProjects => handle_list_projects(),
+        ZencoderAction::GetProject { project_id } => handle_get_project(project_id),
+        ZencoderAction::CreateTask {
+            project_id,
+            title,
+            description,
+            workflow_id,
+            start,
+        } => handle_create_task(project_id, title, description, workflow_id, start),
+        ZencoderAction::ListTasks {
+            project_id,
+            status,
+            limit,
+        } => handle_list_tasks(project_id, status, limit),
+        ZencoderAction::GetTask {
+            project_id,
+            task_id,
+        } => handle_get_task(project_id, task_id),
+        ZencoderAction::UpdateTask {
+            project_id,
+            task_id,
+            title,
+            description,
+            status,
+        } => handle_update_task(project_id, task_id, title, description, status),
+        ZencoderAction::ListWorkflows { project_id } => handle_list_workflows(project_id),
         ZencoderAction::GetPlan { .. } => stub("get_plan"),
         ZencoderAction::CreatePlan { .. } => stub("create_plan"),
         ZencoderAction::UpdatePlanStep { .. } => stub("update_plan_step"),
@@ -436,6 +455,153 @@ fn execute_inner(params: &str) -> Result<String, String> {
         ZencoderAction::SolveCodingProblem { .. } => stub("solve_coding_problem"),
         ZencoderAction::CheckSolutionStatus { .. } => stub("check_solution_status"),
     }
+}
+
+fn handle_list_projects() -> Result<String, String> {
+    api_request("GET", "/api/v1/projects", None)
+}
+
+fn handle_get_project(project_id: String) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    let path = format!("/api/v1/projects/{}", url_encode_path(&project_id));
+    api_request("GET", &path, None)
+}
+
+fn handle_create_task(
+    project_id: String,
+    title: String,
+    description: Option<String>,
+    workflow_id: Option<String>,
+    start: Option<bool>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    let trimmed_title = title.trim();
+    if trimmed_title.is_empty() {
+        return Err("title must not be empty".into());
+    }
+    validate_input_length(trimmed_title, "title")?;
+    if let Some(ref d) = description {
+        validate_input_length(d, "description")?;
+    }
+    if let Some(ref w) = workflow_id {
+        validate_input_length(w, "workflow_id")?;
+    }
+
+    let mut body = serde_json::json!({ "title": trimmed_title });
+    if let Some(d) = description {
+        body["description"] = serde_json::Value::String(d);
+    }
+    if let Some(w) = workflow_id {
+        body["workflow_id"] = serde_json::Value::String(w);
+    }
+    if let Some(s) = start {
+        body["start"] = serde_json::Value::Bool(s);
+    }
+
+    let path = format!(
+        "/api/v1/projects/{}/tasks",
+        url_encode_path(&project_id)
+    );
+    api_request("POST", &path, Some(body.to_string()))
+}
+
+fn handle_list_tasks(
+    project_id: String,
+    status: Option<String>,
+    limit: Option<u32>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    if let Some(ref s) = status {
+        validate_task_status(s)?;
+    }
+
+    let mut path = format!(
+        "/api/v1/projects/{}/tasks",
+        url_encode_path(&project_id)
+    );
+
+    let mut params: Vec<String> = Vec::new();
+    if let Some(ref s) = status {
+        params.push(format!("status={}", url_encode_query(s)));
+    }
+    if let Some(n) = limit {
+        params.push(format!("limit={}", n));
+    }
+    if !params.is_empty() {
+        path.push('?');
+        path.push_str(&params.join("&"));
+    }
+
+    api_request("GET", &path, None)
+}
+
+fn handle_get_task(project_id: String, task_id: String) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    api_request("GET", &path, None)
+}
+
+fn handle_update_task(
+    project_id: String,
+    task_id: String,
+    title: Option<String>,
+    description: Option<String>,
+    status: Option<String>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+
+    if title.is_none() && description.is_none() && status.is_none() {
+        return Err("update_task requires at least one of: title, description, status".into());
+    }
+
+    if let Some(ref s) = status {
+        validate_task_status(s)?;
+    }
+
+    let mut body = serde_json::Map::new();
+    if let Some(t) = title {
+        let trimmed = t.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("title must not be empty".into());
+        }
+        validate_input_length(&trimmed, "title")?;
+        body.insert("title".into(), serde_json::Value::String(trimmed));
+    }
+    if let Some(d) = description {
+        validate_input_length(&d, "description")?;
+        body.insert("description".into(), serde_json::Value::String(d));
+    }
+    if let Some(s) = status {
+        body.insert("status".into(), serde_json::Value::String(s));
+    }
+
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    api_request(
+        "PATCH",
+        &path,
+        Some(serde_json::Value::Object(body).to_string()),
+    )
+}
+
+fn handle_list_workflows(project_id: Option<String>) -> Result<String, String> {
+    let path = match project_id {
+        Some(pid) => {
+            validate_uuid(&pid, "project_id")?;
+            format!("/api/v1/projects/{}/workflows", url_encode_path(&pid))
+        }
+        None => "/api/v1/workflows".to_string(),
+    };
+    api_request("GET", &path, None)
 }
 
 fn stub(action: &str) -> Result<String, String> {
@@ -579,5 +745,106 @@ mod tests {
         let json = r#"{"action":"solve_coding_problem","project_id":"550e8400-e29b-41d4-a716-446655440000","description":"Fix the login bug"}"#;
         let action: ZencoderAction = serde_json::from_str(json).unwrap();
         assert!(matches!(action, ZencoderAction::SolveCodingProblem { .. }));
+    }
+
+    #[test]
+    fn test_handle_get_project_invalid_uuid() {
+        let err = handle_get_project("not-a-uuid".into()).unwrap_err();
+        assert!(err.contains("project_id"));
+    }
+
+    #[test]
+    fn test_handle_create_task_empty_title() {
+        let err = handle_create_task(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "   ".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("title must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_create_task_invalid_uuid() {
+        let err = handle_create_task("bad".into(), "Title".into(), None, None, None).unwrap_err();
+        assert!(err.contains("project_id"));
+    }
+
+    #[test]
+    fn test_handle_list_tasks_invalid_status() {
+        let err = handle_list_tasks(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            Some("bogus".into()),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid status"));
+    }
+
+    #[test]
+    fn test_handle_list_tasks_invalid_uuid() {
+        let err = handle_list_tasks("bad".into(), None, None).unwrap_err();
+        assert!(err.contains("project_id"));
+    }
+
+    #[test]
+    fn test_handle_get_task_invalid_uuids() {
+        let err = handle_get_task("bad".into(), "bad".into()).unwrap_err();
+        assert!(err.contains("project_id"));
+
+        let err = handle_get_task(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "bad".into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("task_id"));
+    }
+
+    #[test]
+    fn test_handle_update_task_all_none() {
+        let err = handle_update_task(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("requires at least one of"));
+    }
+
+    #[test]
+    fn test_handle_update_task_invalid_status() {
+        let err = handle_update_task(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            None,
+            None,
+            Some("INVALID".into()),
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid status"));
+    }
+
+    #[test]
+    fn test_handle_update_task_empty_title() {
+        let err = handle_update_task(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            Some("   ".into()),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("title must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_list_workflows_invalid_uuid() {
+        let err =
+            handle_list_workflows(Some("not-valid".into())).unwrap_err();
+        assert!(err.contains("project_id"));
     }
 }

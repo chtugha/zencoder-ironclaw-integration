@@ -88,7 +88,8 @@ Reference: spec Sections 3–5, 7.
 - [ ] Unit tests: UUID validation (valid, wrong length, wrong segments, non-hex, wrong segment lengths), input length (at limit, over limit), status validation (valid/invalid for both task and step), schedule validation (valid/invalid times, valid/invalid days), URL encoding (special chars, spaces, unicode), action deserialization (at least 3 representative variants)
 - [ ] Verify: `cargo test` passes, `cargo check --target wasm32-wasip1` succeeds
 
-### [ ] Step: Action Handlers — Projects, Tasks & Workflows
+### [x] Step: Action Handlers — Projects, Tasks & Workflows
+<!-- chat-id: 86b6a70b-c93b-4a52-848b-fc132e500192 -->
 
 Implement the handler functions for project, task, and workflow management actions (7 actions). Each handler validates inputs, constructs the API path, calls `api_request()`, and returns the result.
 
@@ -105,6 +106,7 @@ Reference: spec Section 6.2 endpoint table.
 - [ ] Verify: `cargo test` passes, `cargo check --target wasm32-wasip1` succeeds
 
 ### [ ] Step: Action Handlers — Plans & Automations
+<!-- chat-id: b54fa928-ae45-4432-914d-21170541c2d0 -->
 
 Implement the handler functions for plan management (4 actions), automation management (3 actions), and task automation (1 action).
 
