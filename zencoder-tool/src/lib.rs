@@ -444,14 +444,55 @@ fn execute_inner(params: &str) -> Result<String, String> {
             status,
         } => handle_update_task(project_id, task_id, title, description, status),
         ZencoderAction::ListWorkflows { project_id } => handle_list_workflows(project_id),
-        ZencoderAction::GetPlan { .. } => stub("get_plan"),
-        ZencoderAction::CreatePlan { .. } => stub("create_plan"),
-        ZencoderAction::UpdatePlanStep { .. } => stub("update_plan_step"),
-        ZencoderAction::AddPlanSteps { .. } => stub("add_plan_steps"),
-        ZencoderAction::ListAutomations { .. } => stub("list_automations"),
-        ZencoderAction::CreateAutomation { .. } => stub("create_automation"),
-        ZencoderAction::ToggleAutomation { .. } => stub("toggle_automation"),
-        ZencoderAction::ListTaskAutomations { .. } => stub("list_task_automations"),
+        ZencoderAction::GetPlan {
+            project_id,
+            task_id,
+        } => handle_get_plan(project_id, task_id),
+        ZencoderAction::CreatePlan {
+            project_id,
+            task_id,
+            steps,
+        } => handle_create_plan(project_id, task_id, steps),
+        ZencoderAction::UpdatePlanStep {
+            project_id,
+            task_id,
+            step_id,
+            status,
+            name,
+            description,
+        } => handle_update_plan_step(project_id, task_id, step_id, status, name, description),
+        ZencoderAction::AddPlanSteps {
+            project_id,
+            task_id,
+            steps,
+            after_step_id,
+        } => handle_add_plan_steps(project_id, task_id, steps, after_step_id),
+        ZencoderAction::ListAutomations { enabled } => handle_list_automations(enabled),
+        ZencoderAction::CreateAutomation {
+            name,
+            target_project_id,
+            task_name,
+            task_description,
+            task_workflow,
+            schedule_time,
+            schedule_days_of_week,
+        } => handle_create_automation(
+            name,
+            target_project_id,
+            task_name,
+            task_description,
+            task_workflow,
+            schedule_time,
+            schedule_days_of_week,
+        ),
+        ZencoderAction::ToggleAutomation {
+            automation_id,
+            enabled,
+        } => handle_toggle_automation(automation_id, enabled),
+        ZencoderAction::ListTaskAutomations {
+            project_id,
+            task_id,
+        } => handle_list_task_automations(project_id, task_id),
         ZencoderAction::SolveCodingProblem { .. } => stub("solve_coding_problem"),
         ZencoderAction::CheckSolutionStatus { .. } => stub("check_solution_status"),
     }
@@ -601,6 +642,237 @@ fn handle_list_workflows(project_id: Option<String>) -> Result<String, String> {
         }
         None => "/api/v1/workflows".to_string(),
     };
+    api_request("GET", &path, None)
+}
+
+fn handle_get_plan(project_id: String, task_id: String) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}/plan",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    api_request("GET", &path, None)
+}
+
+fn handle_create_plan(
+    project_id: String,
+    task_id: String,
+    steps: Vec<PlanStep>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+    if steps.is_empty() {
+        return Err("at least one step is required".into());
+    }
+    let steps: Vec<PlanStep> = steps
+        .into_iter()
+        .map(|s| PlanStep {
+            name: s.name.trim().to_string(),
+            description: s.description,
+        })
+        .collect();
+    for step in &steps {
+        if step.name.is_empty() {
+            return Err("step name must not be empty".into());
+        }
+        validate_input_length(&step.name, "step name")?;
+        validate_input_length(&step.description, "step description")?;
+    }
+    let body = serde_json::json!({ "steps": steps });
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}/plan",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    api_request("POST", &path, Some(body.to_string()))
+}
+
+fn handle_update_plan_step(
+    project_id: String,
+    task_id: String,
+    step_id: String,
+    status: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+    validate_uuid(&step_id, "step_id")?;
+
+    if status.is_none() && name.is_none() && description.is_none() {
+        return Err(
+            "update_plan_step requires at least one of: status, name, description".into(),
+        );
+    }
+
+    if let Some(ref s) = status {
+        validate_step_status(s)?;
+    }
+
+    let mut body = serde_json::Map::new();
+    if let Some(s) = status {
+        body.insert("status".into(), serde_json::Value::String(s));
+    }
+    if let Some(n) = name {
+        let n = n.trim().to_string();
+        if n.is_empty() {
+            return Err("name must not be empty".into());
+        }
+        validate_input_length(&n, "name")?;
+        body.insert("name".into(), serde_json::Value::String(n));
+    }
+    if let Some(d) = description {
+        validate_input_length(&d, "description")?;
+        body.insert("description".into(), serde_json::Value::String(d));
+    }
+
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}/plan/steps/{}",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id),
+        url_encode_path(&step_id)
+    );
+    api_request(
+        "PATCH",
+        &path,
+        Some(serde_json::Value::Object(body).to_string()),
+    )
+}
+
+fn handle_add_plan_steps(
+    project_id: String,
+    task_id: String,
+    steps: Vec<PlanStep>,
+    after_step_id: Option<String>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+    if steps.is_empty() {
+        return Err("at least one step is required".into());
+    }
+    let steps: Vec<PlanStep> = steps
+        .into_iter()
+        .map(|s| PlanStep {
+            name: s.name.trim().to_string(),
+            description: s.description,
+        })
+        .collect();
+    for step in &steps {
+        if step.name.is_empty() {
+            return Err("step name must not be empty".into());
+        }
+        validate_input_length(&step.name, "step name")?;
+        validate_input_length(&step.description, "step description")?;
+    }
+    if let Some(ref id) = after_step_id {
+        validate_uuid(id, "after_step_id")?;
+    }
+
+    let mut body = serde_json::json!({ "steps": steps });
+    if let Some(id) = after_step_id {
+        body["after_step_id"] = serde_json::Value::String(id);
+    }
+
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}/plan/steps",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    api_request("POST", &path, Some(body.to_string()))
+}
+
+fn handle_list_automations(enabled: Option<bool>) -> Result<String, String> {
+    let path = match enabled {
+        Some(e) => format!("/api/v1/automations?enabled={}", e),
+        None => "/api/v1/automations".to_string(),
+    };
+    api_request("GET", &path, None)
+}
+
+fn handle_create_automation(
+    name: String,
+    target_project_id: Option<String>,
+    task_name: Option<String>,
+    task_description: Option<String>,
+    task_workflow: Option<String>,
+    schedule_time: Option<String>,
+    schedule_days_of_week: Option<Vec<u8>>,
+) -> Result<String, String> {
+    let trimmed_name = name.trim();
+    if trimmed_name.is_empty() {
+        return Err("name must not be empty".into());
+    }
+    validate_input_length(trimmed_name, "name")?;
+    if let Some(ref pid) = target_project_id {
+        validate_uuid(pid, "target_project_id")?;
+    }
+    let task_name = task_name.map(|tn| tn.trim().to_string());
+    if let Some(ref tn) = task_name {
+        if tn.is_empty() {
+            return Err("task_name must not be empty".into());
+        }
+        validate_input_length(tn, "task_name")?;
+    }
+    if let Some(ref td) = task_description {
+        validate_input_length(td, "task_description")?;
+    }
+    if let Some(ref tw) = task_workflow {
+        validate_input_length(tw, "task_workflow")?;
+    }
+    if let Some(ref st) = schedule_time {
+        validate_schedule_time(st)?;
+    }
+    if let Some(ref days) = schedule_days_of_week {
+        if days.is_empty() {
+            return Err("schedule_days_of_week must contain at least one day".into());
+        }
+        validate_days_of_week(days)?;
+    }
+
+    let mut body = serde_json::json!({ "name": trimmed_name });
+    if let Some(pid) = target_project_id {
+        body["target_project_id"] = serde_json::Value::String(pid);
+    }
+    if let Some(tn) = task_name {
+        body["task_name"] = serde_json::Value::String(tn);
+    }
+    if let Some(td) = task_description {
+        body["task_description"] = serde_json::Value::String(td);
+    }
+    if let Some(tw) = task_workflow {
+        body["task_workflow"] = serde_json::Value::String(tw);
+    }
+    if let Some(st) = schedule_time {
+        body["schedule_time"] = serde_json::Value::String(st);
+    }
+    if let Some(days) = schedule_days_of_week {
+        body["schedule_days_of_week"] =
+            serde_json::Value::Array(days.into_iter().map(|d| serde_json::json!(d)).collect());
+    }
+
+    api_request("POST", "/api/v1/automations", Some(body.to_string()))
+}
+
+fn handle_toggle_automation(automation_id: String, enabled: bool) -> Result<String, String> {
+    validate_uuid(&automation_id, "automation_id")?;
+    let body = serde_json::json!({ "enabled": enabled });
+    let path = format!(
+        "/api/v1/automations/{}/toggle",
+        url_encode_path(&automation_id)
+    );
+    api_request("POST", &path, Some(body.to_string()))
+}
+
+fn handle_list_task_automations(project_id: String, task_id: String) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+    let path = format!(
+        "/api/v1/projects/{}/tasks/{}/automations",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
     api_request("GET", &path, None)
 }
 
@@ -846,5 +1118,295 @@ mod tests {
         let err =
             handle_list_workflows(Some("not-valid".into())).unwrap_err();
         assert!(err.contains("project_id"));
+    }
+
+    #[test]
+    fn test_handle_get_plan_invalid_uuids() {
+        let err = handle_get_plan("bad".into(), "bad".into()).unwrap_err();
+        assert!(err.contains("project_id"));
+
+        let err = handle_get_plan(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "bad".into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("task_id"));
+    }
+
+    #[test]
+    fn test_handle_create_plan_empty_step_name() {
+        let err = handle_create_plan(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            vec![PlanStep {
+                name: "   ".into(),
+                description: "d".into(),
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("step name must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_add_plan_steps_empty_step_name() {
+        let err = handle_add_plan_steps(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            vec![PlanStep {
+                name: "".into(),
+                description: "d".into(),
+            }],
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("step name must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_create_automation_empty_task_name() {
+        let err = handle_create_automation(
+            "My Auto".into(),
+            None,
+            Some("   ".into()),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("task_name must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_create_automation_empty_days() {
+        let err = handle_create_automation(
+            "My Auto".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec![]),
+        )
+        .unwrap_err();
+        assert!(err.contains("schedule_days_of_week must contain at least one day"));
+    }
+
+    #[test]
+    fn test_handle_create_plan_empty_steps() {
+        let err = handle_create_plan(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            vec![],
+        )
+        .unwrap_err();
+        assert!(err.contains("at least one step is required"));
+    }
+
+    #[test]
+    fn test_handle_create_plan_invalid_uuid() {
+        let err = handle_create_plan(
+            "bad".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            vec![PlanStep {
+                name: "s".into(),
+                description: "d".into(),
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("project_id"));
+    }
+
+    #[test]
+    fn test_handle_update_plan_step_all_none() {
+        let err = handle_update_plan_step(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("requires at least one of"));
+    }
+
+    #[test]
+    fn test_handle_update_plan_step_invalid_status() {
+        let err = handle_update_plan_step(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            Some("bad_status".into()),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid step status"));
+    }
+
+    #[test]
+    fn test_handle_update_plan_step_empty_name() {
+        let err = handle_update_plan_step(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            None,
+            Some("   ".into()),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("name must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_update_plan_step_invalid_step_id() {
+        let err = handle_update_plan_step(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "bad".into(),
+            Some("Completed".into()),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("step_id"));
+    }
+
+    #[test]
+    fn test_handle_add_plan_steps_empty() {
+        let err = handle_add_plan_steps(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            vec![],
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("at least one step is required"));
+    }
+
+    #[test]
+    fn test_handle_add_plan_steps_invalid_after_step_id() {
+        let err = handle_add_plan_steps(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            vec![PlanStep {
+                name: "s".into(),
+                description: "d".into(),
+            }],
+            Some("bad".into()),
+        )
+        .unwrap_err();
+        assert!(err.contains("after_step_id"));
+    }
+
+    #[test]
+    fn test_handle_create_automation_empty_name() {
+        let err =
+            handle_create_automation("   ".into(), None, None, None, None, None, None).unwrap_err();
+        assert!(err.contains("name must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_create_automation_invalid_project_uuid() {
+        let err = handle_create_automation(
+            "My Auto".into(),
+            Some("bad".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("target_project_id"));
+    }
+
+    #[test]
+    fn test_handle_create_automation_invalid_schedule() {
+        let err = handle_create_automation(
+            "My Auto".into(),
+            None,
+            None,
+            None,
+            None,
+            Some("99:99".into()),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid"));
+
+        let err = handle_create_automation(
+            "My Auto".into(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(vec![7]),
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid day_of_week"));
+    }
+
+    #[test]
+    fn test_handle_toggle_automation_invalid_uuid() {
+        let err = handle_toggle_automation("bad".into(), true).unwrap_err();
+        assert!(err.contains("automation_id"));
+    }
+
+    #[test]
+    fn test_handle_list_task_automations_invalid_uuids() {
+        let err = handle_list_task_automations("bad".into(), "bad".into()).unwrap_err();
+        assert!(err.contains("project_id"));
+
+        let err = handle_list_task_automations(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "bad".into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("task_id"));
+    }
+
+    #[test]
+    fn test_action_deserialize_get_plan() {
+        let json = r#"{"action":"get_plan","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::GetPlan { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_create_plan() {
+        let json = r#"{"action":"create_plan","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000","steps":[{"name":"Step 1","description":"Do something"}]}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::CreatePlan { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_list_automations() {
+        let json = r#"{"action":"list_automations"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::ListAutomations { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_toggle_automation() {
+        let json = r#"{"action":"toggle_automation","automation_id":"550e8400-e29b-41d4-a716-446655440000","enabled":false}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::ToggleAutomation { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_create_automation() {
+        let json = r#"{"action":"create_automation","name":"Daily build","schedule_time":"09:00","schedule_days_of_week":[1,2,3,4,5]}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::CreateAutomation { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_list_task_automations() {
+        let json = r#"{"action":"list_task_automations","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::ListTaskAutomations { .. }));
     }
 }

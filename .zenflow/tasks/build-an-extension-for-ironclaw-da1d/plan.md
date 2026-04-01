@@ -105,7 +105,7 @@ Reference: spec Section 6.2 endpoint table.
 - [ ] Wire all handlers into the `execute()` match arms (replacing stubs)
 - [ ] Verify: `cargo test` passes, `cargo check --target wasm32-wasip1` succeeds
 
-### [ ] Step: Action Handlers — Plans & Automations
+### [x] Step: Action Handlers — Plans & Automations
 <!-- chat-id: b54fa928-ae45-4432-914d-21170541c2d0 -->
 
 Implement the handler functions for plan management (4 actions), automation management (3 actions), and task automation (1 action).
