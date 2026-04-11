@@ -19,51 +19,119 @@ The two convenience actions are the primary interface: `solve_coding_problem` cr
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) with the `wasm32-wasip1` target
-- [IronClaw CLI](https://github.com/nearai/ironclaw)
+- [Rust](https://rustup.rs/) 1.85+ with the `wasm32-wasip1` target
+- [IronClaw CLI](https://github.com/nearai/ironclaw) 0.25+
 - A Zencoder API key (get one from [app.zencoder.ai/settings](https://app.zencoder.ai/settings))
 
-### Install the WASM target
+## Installation Guide (Debian 12)
+
+These steps assume a fresh Debian 12 (Bookworm) system. Adjust if you already have some components installed.
+
+### 1. Install system dependencies
+
+```bash
+sudo apt update
+sudo apt install -y curl build-essential pkg-config libssl-dev git
+```
+
+### 2. Install Rust
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+```
+
+Verify the installation:
+
+```bash
+rustc --version   # should show 1.85.x or later
+cargo --version
+```
+
+### 3. Add the WASM target
 
 ```bash
 rustup target add wasm32-wasip1
 ```
 
-## Build
+Verify:
 
 ```bash
-cd zencoder-tool
+rustup target list --installed | grep wasm32-wasip1
+```
+
+### 4. Install IronClaw
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+```
+
+If the installer doesn't add `ironclaw` to your PATH automatically, add it:
+
+```bash
+export PATH="$HOME/.ironclaw/bin:$PATH"
+```
+
+Verify:
+
+```bash
+ironclaw --version
+```
+
+If this is your first time using IronClaw, run the setup wizard:
+
+```bash
+ironclaw onboard
+```
+
+### 5. Clone and build the extension
+
+```bash
+git clone https://github.com/chtugha/zencoder-ironclaw-integration.git
+cd zencoder-ironclaw-integration/zencoder-tool
 cargo build --target wasm32-wasip1 --release
 ```
 
-The compiled WASM binary is at `zencoder-tool/target/wasm32-wasip1/release/zencoder_tool.wasm` (~253KB).
+The compiled WASM binary is at `target/wasm32-wasip1/release/zencoder_tool.wasm` (~253KB).
 
-## Install into IronClaw
-
-### 1. Register the tool
+### 6. Install the tool into IronClaw
 
 ```bash
-ironclaw tool register \
+ironclaw tool install \
   --name zencoder-tool \
-  --wasm ./zencoder-tool/target/wasm32-wasip1/release/zencoder_tool.wasm \
-  --capabilities ./zencoder-tool/zencoder-tool.capabilities.json
+  target/wasm32-wasip1/release/zencoder_tool.wasm \
+  --capabilities zencoder-tool.capabilities.json \
+  --skip-build
 ```
 
-### 2. Set your API key
+Alternatively, install directly from the source directory (IronClaw builds it for you):
 
 ```bash
-ironclaw secret set zencoder_api_key <your-api-key>
+cd ..  # back to zencoder-ironclaw-integration/
+ironclaw tool install ./zencoder-tool
 ```
 
-Your key starts with `zen_` and is obtained from [app.zencoder.ai/settings](https://app.zencoder.ai/settings). The key is stored securely by IronClaw and injected as a Bearer token on API requests — it never enters the WASM sandbox.
+### 7. Set your Zencoder API key
 
-### 3. Verify
+```bash
+ironclaw tool setup zencoder-tool
+```
+
+When prompted, paste your API key (starts with `zen_`, obtained from [app.zencoder.ai/settings](https://app.zencoder.ai/settings)).
+
+The key is stored securely by IronClaw and injected as a Bearer token on API requests — it never enters the WASM sandbox.
+
+### 8. Verify the installation
 
 ```bash
 ironclaw tool list
 ```
 
-You should see `zencoder-tool` in the output.
+You should see `zencoder-tool` in the output. For detailed info:
+
+```bash
+ironclaw tool info zencoder-tool
+```
 
 ## Usage Examples
 
