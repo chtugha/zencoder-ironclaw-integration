@@ -105,6 +105,9 @@ fn validate_schedule_time(s: &str) -> Result<(), String> {
 }
 
 fn validate_days_of_week(days: &[u8]) -> Result<(), String> {
+    if days.is_empty() {
+        return Err("schedule_days_of_week must contain at least one day".into());
+    }
     for &d in days {
         if d > 6 {
             return Err(format!(
@@ -165,10 +168,7 @@ enum ZencoderAction {
     },
 
     #[serde(rename = "get_task")]
-    GetTask {
-        project_id: String,
-        task_id: String,
-    },
+    GetTask { project_id: String, task_id: String },
 
     #[serde(rename = "update_task")]
     UpdateTask {
@@ -183,10 +183,7 @@ enum ZencoderAction {
     ListWorkflows { project_id: Option<String> },
 
     #[serde(rename = "get_plan")]
-    GetPlan {
-        project_id: String,
-        task_id: String,
-    },
+    GetPlan { project_id: String, task_id: String },
 
     #[serde(rename = "create_plan")]
     CreatePlan {
@@ -234,10 +231,7 @@ enum ZencoderAction {
     },
 
     #[serde(rename = "list_task_automations")]
-    ListTaskAutomations {
-        project_id: String,
-        task_id: String,
-    },
+    ListTaskAutomations { project_id: String, task_id: String },
 
     #[serde(rename = "solve_coding_problem")]
     SolveCodingProblem {
@@ -247,10 +241,7 @@ enum ZencoderAction {
     },
 
     #[serde(rename = "check_solution_status")]
-    CheckSolutionStatus {
-        project_id: String,
-        task_id: String,
-    },
+    CheckSolutionStatus { project_id: String, task_id: String },
 }
 
 #[derive(Deserialize, serde::Serialize)]
@@ -351,10 +342,7 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                             if count < 10 {
                                 near::agent::host::log(
                                     near::agent::host::LogLevel::Warn,
-                                    &format!(
-                                        "Zencoder API rate limit low: {} remaining",
-                                        count
-                                    ),
+                                    &format!("Zencoder API rate limit low: {} remaining", count),
                                 );
                             }
                         }
@@ -364,31 +352,35 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                 if resp.status >= 200 && resp.status < 300 {
                     return String::from_utf8(resp.body)
                         .map_err(|e| format!("Invalid UTF-8 in response: {}", e));
-                } else if attempt < max_attempts && (resp.status == 429 || resp.status >= 500) {
-                    let mut msg = format!(
+                } else if resp.status == 429 {
+                    let mut err_msg =
+                        "Zencoder API rate limited (429). Cannot retry without delay in WASM."
+                            .to_string();
+                    if let Ok(headers_json) =
+                        serde_json::from_str::<serde_json::Value>(&resp.headers_json)
+                    {
+                        if let Some(retry_after) = headers_json
+                            .get("retry-after")
+                            .or_else(|| headers_json.get("Retry-After"))
+                            .and_then(|v| v.as_str())
+                        {
+                            err_msg = format!("{} Retry after {}s.", err_msg, retry_after);
+                        }
+                    }
+                    return Err(err_msg);
+                } else if attempt < max_attempts && resp.status >= 500 {
+                    let msg = format!(
                         "Zencoder API error {} (attempt {}/{}). Retrying...",
                         resp.status, attempt, max_attempts
                     );
-                    if resp.status == 429 {
-                        if let Ok(headers_json) =
-                            serde_json::from_str::<serde_json::Value>(&resp.headers_json)
-                        {
-                            if let Some(retry_after) = headers_json
-                                .get("retry-after")
-                                .or_else(|| headers_json.get("Retry-After"))
-                                .and_then(|v| v.as_str())
-                            {
-                                msg = format!("{} (Retry-After: {}s)", msg, retry_after);
-                            }
-                        }
-                    }
                     near::agent::host::log(near::agent::host::LogLevel::Warn, &msg);
                     continue;
                 } else {
-                    return Err(format!(
+                    let err_msg = format!(
                         "Zencoder API returned status {}. Check your API key and parameters.",
                         resp.status
-                    ));
+                    );
+                    return Err(err_msg);
                 }
             }
             Err(e) => {
@@ -493,8 +485,15 @@ fn execute_inner(params: &str) -> Result<String, String> {
             project_id,
             task_id,
         } => handle_list_task_automations(project_id, task_id),
-        ZencoderAction::SolveCodingProblem { .. } => stub("solve_coding_problem"),
-        ZencoderAction::CheckSolutionStatus { .. } => stub("check_solution_status"),
+        ZencoderAction::SolveCodingProblem {
+            project_id,
+            description,
+            workflow_id,
+        } => handle_solve_coding_problem(project_id, description, workflow_id),
+        ZencoderAction::CheckSolutionStatus {
+            project_id,
+            task_id,
+        } => handle_check_solution_status(project_id, task_id),
     }
 }
 
@@ -539,10 +538,7 @@ fn handle_create_task(
         body["start"] = serde_json::Value::Bool(s);
     }
 
-    let path = format!(
-        "/api/v1/projects/{}/tasks",
-        url_encode_path(&project_id)
-    );
+    let path = format!("/api/v1/projects/{}/tasks", url_encode_path(&project_id));
     api_request("POST", &path, Some(body.to_string()))
 }
 
@@ -556,10 +552,7 @@ fn handle_list_tasks(
         validate_task_status(s)?;
     }
 
-    let mut path = format!(
-        "/api/v1/projects/{}/tasks",
-        url_encode_path(&project_id)
-    );
+    let mut path = format!("/api/v1/projects/{}/tasks", url_encode_path(&project_id));
 
     let mut params: Vec<String> = Vec::new();
     if let Some(ref s) = status {
@@ -702,9 +695,7 @@ fn handle_update_plan_step(
     validate_uuid(&step_id, "step_id")?;
 
     if status.is_none() && name.is_none() && description.is_none() {
-        return Err(
-            "update_plan_step requires at least one of: status, name, description".into(),
-        );
+        return Err("update_plan_step requires at least one of: status, name, description".into());
     }
 
     if let Some(ref s) = status {
@@ -825,9 +816,6 @@ fn handle_create_automation(
         validate_schedule_time(st)?;
     }
     if let Some(ref days) = schedule_days_of_week {
-        if days.is_empty() {
-            return Err("schedule_days_of_week must contain at least one day".into());
-        }
         validate_days_of_week(days)?;
     }
 
@@ -876,11 +864,357 @@ fn handle_list_task_automations(project_id: String, task_id: String) -> Result<S
     api_request("GET", &path, None)
 }
 
-fn stub(action: &str) -> Result<String, String> {
-    Err(format!("Action '{}' is not yet implemented", action))
+fn derive_title(description: &str) -> String {
+    let max_len = 100;
+    if description.chars().count() <= max_len {
+        return description.to_string();
+    }
+    let byte_limit = description
+        .char_indices()
+        .nth(max_len)
+        .map(|(idx, _)| idx)
+        .unwrap_or(description.len());
+    let truncated = &description[..byte_limit];
+    match truncated.rfind(' ') {
+        // Only break at word boundary if it keeps at least 10 chars, to avoid extremely short titles
+        Some(pos) if pos > 10 => format!("{}...", &truncated[..pos]),
+        _ => format!("{}...", truncated),
+    }
 }
 
-const SCHEMA: &str = r#"{"type":"object","required":["action"],"oneOf":[]}"#;
+fn handle_solve_coding_problem(
+    project_id: String,
+    description: String,
+    workflow_id: Option<String>,
+) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    let trimmed = description.trim();
+    if trimmed.is_empty() {
+        return Err("description must not be empty".into());
+    }
+    validate_input_length(trimmed, "description")?;
+
+    let title = derive_title(trimmed);
+    let wf = workflow_id.unwrap_or_else(|| "default-auto-workflow".to_string());
+
+    let body = serde_json::json!({
+        "title": title,
+        "description": trimmed,
+        "workflow_id": wf,
+        "start": true
+    });
+
+    let path = format!("/api/v1/projects/{}/tasks", url_encode_path(&project_id));
+    let resp = api_request("POST", &path, Some(body.to_string()))?;
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(&resp).map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let task_id = parsed
+        .get("data")
+        .and_then(|d| d.get("id"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            parsed
+                .get("data")
+                .and_then(|d| d.get("task_id"))
+                .and_then(|v| v.as_str())
+        })
+        .or_else(|| parsed.get("id").and_then(|v| v.as_str()))
+        .ok_or_else(|| {
+            "Failed to extract task_id from API response. Response format may have changed."
+                .to_string()
+        })?;
+
+    let result = serde_json::json!({
+        "task_id": task_id,
+        "message": format!("Task created and started. Track progress with check_solution_status using task_id: {}", task_id)
+    });
+    Ok(result.to_string())
+}
+
+fn handle_check_solution_status(project_id: String, task_id: String) -> Result<String, String> {
+    validate_uuid(&project_id, "project_id")?;
+    validate_uuid(&task_id, "task_id")?;
+
+    let task_path = format!(
+        "/api/v1/projects/{}/tasks/{}",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    let task_resp = api_request("GET", &task_path, None)?;
+    let task_json: serde_json::Value = serde_json::from_str(&task_resp)
+        .map_err(|e| format!("Failed to parse task response: {}", e))?;
+
+    let task_data = task_json.get("data").unwrap_or(&task_json);
+    let task_status = task_data
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let branch = task_data
+        .get("branch")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let plan_path = format!(
+        "/api/v1/projects/{}/tasks/{}/plan",
+        url_encode_path(&project_id),
+        url_encode_path(&task_id)
+    );
+    let (plan_steps, progress) = match api_request("GET", &plan_path, None) {
+        Ok(plan_resp) => {
+            let plan_json: serde_json::Value = match serde_json::from_str(&plan_resp) {
+                Ok(v) => v,
+                Err(e) => {
+                    near::agent::host::log(
+                        near::agent::host::LogLevel::Warn,
+                        &format!(
+                            "Failed to parse plan response JSON (treating as empty): {}",
+                            e
+                        ),
+                    );
+                    serde_json::json!({})
+                }
+            };
+            let plan_data = plan_json.get("data").unwrap_or(&plan_json);
+            let steps_arr = plan_data
+                .get("steps")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+
+            let summaries: Vec<PlanStepSummary> = steps_arr
+                .iter()
+                .map(|s| PlanStepSummary {
+                    name: s
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status: s
+                        .get("status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Pending")
+                        .to_string(),
+                })
+                .collect();
+
+            let total = summaries.len();
+            let completed = summaries.iter().filter(|s| s.status == "Completed").count();
+            let progress = format!("{} of {} steps completed", completed, total);
+            (summaries, progress)
+        }
+        Err(e) => {
+            near::agent::host::log(
+                near::agent::host::LogLevel::Warn,
+                &format!("Failed to fetch plan (treating as empty): {}", e),
+            );
+            (Vec::new(), "0 of 0 steps completed".to_string())
+        }
+    };
+
+    let status = SolutionStatus {
+        task_status,
+        plan_steps,
+        progress,
+        branch,
+    };
+    serde_json::to_string(&status).map_err(|e| format!("Failed to serialize status: {}", e))
+}
+
+const SCHEMA: &str = r#"{
+  "type": "object",
+  "required": ["action"],
+  "oneOf": [
+    {
+      "properties": {
+        "action": { "const": "list_projects" }
+      },
+      "required": ["action"],
+      "additionalProperties": false,
+      "description": "List all available projects"
+    },
+    {
+      "properties": {
+        "action": { "const": "get_project" },
+        "project_id": { "type": "string", "description": "Project UUID" }
+      },
+      "required": ["action", "project_id"],
+      "additionalProperties": false,
+      "description": "Get details of a specific project"
+    },
+    {
+      "properties": {
+        "action": { "const": "create_task" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "title": { "type": "string", "description": "Task title" },
+        "description": { "type": "string", "description": "Task description" },
+        "workflow_id": { "type": "string", "description": "Workflow ID (UUID) or slug (e.g. 'default-auto-workflow'). Both formats accepted." },
+        "start": { "type": "boolean", "description": "Start execution immediately" }
+      },
+      "required": ["action", "project_id", "title"],
+      "additionalProperties": false,
+      "description": "Create a new task in a project"
+    },
+    {
+      "properties": {
+        "action": { "const": "list_tasks" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "status": { "type": "string", "enum": ["todo", "inprogress", "inreview", "done", "cancelled"], "description": "Filter by status" },
+        "limit": { "type": "integer", "description": "Max tasks to return" }
+      },
+      "required": ["action", "project_id"],
+      "additionalProperties": false,
+      "description": "List tasks in a project"
+    },
+    {
+      "properties": {
+        "action": { "const": "get_task" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" }
+      },
+      "required": ["action", "project_id", "task_id"],
+      "additionalProperties": false,
+      "description": "Get details of a specific task"
+    },
+    {
+      "properties": {
+        "action": { "const": "update_task" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" },
+        "title": { "type": "string", "description": "New title" },
+        "description": { "type": "string", "description": "New description" },
+        "status": { "type": "string", "enum": ["todo", "inprogress", "inreview", "done", "cancelled"], "description": "New status" }
+      },
+      "required": ["action", "project_id", "task_id"],
+      "additionalProperties": false,
+      "description": "Update a task (at least one of title, description, status required)"
+    },
+    {
+      "properties": {
+        "action": { "const": "list_workflows" },
+        "project_id": { "type": "string", "description": "Project UUID (omit for global workflows)" }
+      },
+      "required": ["action"],
+      "additionalProperties": false,
+      "description": "List available workflows"
+    },
+    {
+      "properties": {
+        "action": { "const": "get_plan" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" }
+      },
+      "required": ["action", "project_id", "task_id"],
+      "additionalProperties": false,
+      "description": "Get the structured plan for a task"
+    },
+    {
+      "properties": {
+        "action": { "const": "create_plan" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" },
+        "steps": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" } }, "required": ["name", "description"] }, "minItems": 1, "description": "Plan steps" }
+      },
+      "required": ["action", "project_id", "task_id", "steps"],
+      "additionalProperties": false,
+      "description": "Create a structured plan for a task"
+    },
+    {
+      "properties": {
+        "action": { "const": "update_plan_step" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" },
+        "step_id": { "type": "string", "description": "Step UUID" },
+        "status": { "type": "string", "enum": ["Pending", "InProgress", "Completed", "Skipped"], "description": "New step status" },
+        "name": { "type": "string", "description": "New step name" },
+        "description": { "type": "string", "description": "New step description" }
+      },
+      "required": ["action", "project_id", "task_id", "step_id"],
+      "additionalProperties": false,
+      "description": "Update a plan step (at least one of status, name, description required)"
+    },
+    {
+      "properties": {
+        "action": { "const": "add_plan_steps" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" },
+        "steps": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" } }, "required": ["name", "description"] }, "minItems": 1, "description": "Steps to add" },
+        "after_step_id": { "type": "string", "description": "Insert after this step UUID" }
+      },
+      "required": ["action", "project_id", "task_id", "steps"],
+      "additionalProperties": false,
+      "description": "Add steps to an existing plan"
+    },
+    {
+      "properties": {
+        "action": { "const": "list_automations" },
+        "enabled": { "type": "boolean", "description": "Filter by enabled state" }
+      },
+      "required": ["action"],
+      "additionalProperties": false,
+      "description": "List scheduled automations"
+    },
+    {
+      "properties": {
+        "action": { "const": "create_automation" },
+        "name": { "type": "string", "description": "Automation name" },
+        "target_project_id": { "type": "string", "description": "Target project UUID" },
+        "task_name": { "type": "string", "description": "Task name template" },
+        "task_description": { "type": "string", "description": "Task description template" },
+        "task_workflow": { "type": "string", "description": "Workflow ID (UUID) or slug (e.g. 'default-auto-workflow'). Both formats accepted." },
+        "schedule_time": { "type": "string", "description": "Time in HH:MM format (24-hour)" },
+        "schedule_days_of_week": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 6 }, "description": "Days: 0=Sun..6=Sat" }
+      },
+      "required": ["action", "name"],
+      "additionalProperties": false,
+      "description": "Create a scheduled automation"
+    },
+    {
+      "properties": {
+        "action": { "const": "toggle_automation" },
+        "automation_id": { "type": "string", "description": "Automation UUID" },
+        "enabled": { "type": "boolean", "description": "Enable or disable" }
+      },
+      "required": ["action", "automation_id", "enabled"],
+      "additionalProperties": false,
+      "description": "Enable or disable an automation"
+    },
+    {
+      "properties": {
+        "action": { "const": "list_task_automations" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID" }
+      },
+      "required": ["action", "project_id", "task_id"],
+      "additionalProperties": false,
+      "description": "List task automations (flows) for a task"
+    },
+    {
+      "properties": {
+        "action": { "const": "solve_coding_problem" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "description": { "type": "string", "description": "Problem description to solve" },
+        "workflow_id": { "type": "string", "description": "Workflow ID (UUID) or slug (default: 'default-auto-workflow'). Both formats accepted." }
+      },
+      "required": ["action", "project_id", "description"],
+      "additionalProperties": false,
+      "description": "Delegate a coding problem to Zenflow AI agents. Creates and starts a task automatically."
+    },
+    {
+      "properties": {
+        "action": { "const": "check_solution_status" },
+        "project_id": { "type": "string", "description": "Project UUID" },
+        "task_id": { "type": "string", "description": "Task UUID returned by solve_coding_problem" }
+      },
+      "required": ["action", "project_id", "task_id"],
+      "additionalProperties": false,
+      "description": "Check the progress of a coding problem solution"
+    }
+  ]
+}"#;
 
 export!(ZencoderTool);
 
@@ -971,7 +1305,7 @@ mod tests {
     #[test]
     fn test_validate_days_of_week_valid() {
         assert!(validate_days_of_week(&[0, 1, 2, 3, 4, 5, 6]).is_ok());
-        assert!(validate_days_of_week(&[]).is_ok());
+        assert!(validate_days_of_week(&[]).is_err());
     }
 
     #[test]
@@ -1066,11 +1400,8 @@ mod tests {
         let err = handle_get_task("bad".into(), "bad".into()).unwrap_err();
         assert!(err.contains("project_id"));
 
-        let err = handle_get_task(
-            "550e8400-e29b-41d4-a716-446655440000".into(),
-            "bad".into(),
-        )
-        .unwrap_err();
+        let err = handle_get_task("550e8400-e29b-41d4-a716-446655440000".into(), "bad".into())
+            .unwrap_err();
         assert!(err.contains("task_id"));
     }
 
@@ -1115,8 +1446,7 @@ mod tests {
 
     #[test]
     fn test_handle_list_workflows_invalid_uuid() {
-        let err =
-            handle_list_workflows(Some("not-valid".into())).unwrap_err();
+        let err = handle_list_workflows(Some("not-valid".into())).unwrap_err();
         assert!(err.contains("project_id"));
     }
 
@@ -1125,11 +1455,8 @@ mod tests {
         let err = handle_get_plan("bad".into(), "bad".into()).unwrap_err();
         assert!(err.contains("project_id"));
 
-        let err = handle_get_plan(
-            "550e8400-e29b-41d4-a716-446655440000".into(),
-            "bad".into(),
-        )
-        .unwrap_err();
+        let err = handle_get_plan("550e8400-e29b-41d4-a716-446655440000".into(), "bad".into())
+            .unwrap_err();
         assert!(err.contains("task_id"));
     }
 
@@ -1179,16 +1506,9 @@ mod tests {
 
     #[test]
     fn test_handle_create_automation_empty_days() {
-        let err = handle_create_automation(
-            "My Auto".into(),
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(vec![]),
-        )
-        .unwrap_err();
+        let err =
+            handle_create_automation("My Auto".into(), None, None, None, None, None, Some(vec![]))
+                .unwrap_err();
         assert!(err.contains("schedule_days_of_week must contain at least one day"));
     }
 
@@ -1408,5 +1728,144 @@ mod tests {
         let json = r#"{"action":"list_task_automations","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
         let action: ZencoderAction = serde_json::from_str(json).unwrap();
         assert!(matches!(action, ZencoderAction::ListTaskAutomations { .. }));
+    }
+
+    #[test]
+    fn test_derive_title_short() {
+        let input = "Fix the login bug";
+        assert_eq!(derive_title(input), "Fix the login bug");
+    }
+
+    #[test]
+    fn test_derive_title_exactly_100_chars() {
+        let input = "a".repeat(100);
+        assert_eq!(derive_title(&input), input);
+    }
+
+    #[test]
+    fn test_derive_title_long_with_word_boundary() {
+        let input = format!("{} {}", "word".repeat(20), "tail".repeat(10));
+        let result = derive_title(&input);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() <= 104);
+    }
+
+    #[test]
+    fn test_derive_title_long_no_spaces_near_boundary() {
+        let input = "a".repeat(200);
+        let result = derive_title(&input);
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 103);
+    }
+
+    #[test]
+    fn test_derive_title_multibyte_utf8() {
+        let input = "\u{00e9}".repeat(150);
+        let result = derive_title(&input);
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 103);
+    }
+
+    #[test]
+    fn test_derive_title_early_word_boundary() {
+        let input = format!("a b {}", "c".repeat(200));
+        let result = derive_title(&input);
+        assert!(result.ends_with("..."));
+        assert_eq!(result.chars().count(), 103);
+    }
+
+    #[test]
+    fn test_handle_solve_coding_problem_empty_description() {
+        let err = handle_solve_coding_problem(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "   ".into(),
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("description must not be empty"));
+    }
+
+    #[test]
+    fn test_handle_solve_coding_problem_invalid_uuid() {
+        let err =
+            handle_solve_coding_problem("bad".into(), "Fix the bug".into(), None).unwrap_err();
+        assert!(err.contains("project_id"));
+    }
+
+    #[test]
+    fn test_handle_check_solution_status_invalid_uuids() {
+        let err = handle_check_solution_status("bad".into(), "bad".into()).unwrap_err();
+        assert!(err.contains("project_id"));
+
+        let err = handle_check_solution_status(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "bad".into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("task_id"));
+    }
+
+    #[test]
+    fn test_action_deserialize_get_project() {
+        let json =
+            r#"{"action":"get_project","project_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::GetProject { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_list_tasks() {
+        let json = r#"{"action":"list_tasks","project_id":"550e8400-e29b-41d4-a716-446655440000","status":"todo","limit":10}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::ListTasks { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_get_task() {
+        let json = r#"{"action":"get_task","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::GetTask { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_update_task() {
+        let json = r#"{"action":"update_task","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000","status":"done"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::UpdateTask { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_list_workflows() {
+        let json = r#"{"action":"list_workflows"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::ListWorkflows { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_update_plan_step() {
+        let json = r#"{"action":"update_plan_step","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000","step_id":"550e8400-e29b-41d4-a716-446655440000","status":"Completed"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::UpdatePlanStep { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_add_plan_steps() {
+        let json = r#"{"action":"add_plan_steps","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000","steps":[{"name":"New step","description":"Details"}]}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::AddPlanSteps { .. }));
+    }
+
+    #[test]
+    fn test_action_deserialize_check_solution_status() {
+        let json = r#"{"action":"check_solution_status","project_id":"550e8400-e29b-41d4-a716-446655440000","task_id":"550e8400-e29b-41d4-a716-446655440000"}"#;
+        let action: ZencoderAction = serde_json::from_str(json).unwrap();
+        assert!(matches!(action, ZencoderAction::CheckSolutionStatus { .. }));
+    }
+
+    #[test]
+    fn test_schema_is_valid_json() {
+        let parsed: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+        let one_of = parsed.get("oneOf").unwrap().as_array().unwrap();
+        assert_eq!(one_of.len(), 17);
     }
 }

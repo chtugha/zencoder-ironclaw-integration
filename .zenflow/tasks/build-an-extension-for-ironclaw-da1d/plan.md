@@ -123,7 +123,8 @@ Reference: spec Sections 6.2, 7.
 - [ ] Wire all handlers into the `execute()` match arms
 - [ ] Verify: `cargo test` passes, `cargo check --target wasm32-wasip1` succeeds
 
-### [ ] Step: Convenience Actions, JSON Schema & Comprehensive Tests
+### [x] Step: Convenience Actions, JSON Schema & Comprehensive Tests
+<!-- chat-id: b4116c2c-8d10-4b49-9eff-6a33ef07cf89 -->
 
 Implement the two high-level convenience actions, the complete JSON schema, and comprehensive unit tests for all action deserialization and the `derive_title` helper.
 
@@ -138,26 +139,27 @@ Reference: spec Sections 8, 10, 14.1.
 - [ ] Unit tests for action deserialization: every `ZencoderAction` variant parses correctly from JSON
 - [ ] Verify: `cargo test` passes, `cargo check --target wasm32-wasip1` succeeds
 
-### [ ] Step: Build Verification & Security Review
+### [x] Step: Build Verification & Security Review
+<!-- chat-id: 3ee0f7f5-827e-48e1-98d5-8705917f52c2 -->
 
 Final build, lint, format check, WASM compilation, and security audit against the spec's checklist.
 
-- [ ] `cargo fmt --check` — fix any formatting issues
-- [ ] `cargo clippy --target wasm32-wasip1 --all --all-features` — fix any warnings
-- [ ] `cargo test` — all unit tests pass
-- [ ] `cargo build --target wasm32-wasip1 --release` — WASM binary compiles successfully
-- [ ] Check WASM binary size (`target/wasm32-wasip1/release/zencoder_tool.wasm`) — report size, note if over 500KB target
-- [ ] Security checklist (spec Section 15):
-  - [ ] No secrets handled in WASM code (only `secret_exists` check)
-  - [ ] All UUIDs validated before URL interpolation
-  - [ ] All string inputs length-bounded
-  - [ ] URL path segments percent-encoded
-  - [ ] HTTP allowlist restricted to `api.zencoder.ai` only
-  - [ ] No DELETE or PUT methods in allowlist
-  - [ ] Rate limits configured in capabilities
-  - [ ] Error messages contain no credential data
-  - [ ] Status enum values validated before use
-  - [ ] Schedule values range-checked
-  - [ ] No `unsafe` code
-  - [ ] No panic paths in production code (all errors returned as `Result`)
-- [ ] Record all verification results in this plan
+- [x] `cargo fmt --check` — formatting issues found and fixed via `cargo fmt`
+- [x] `cargo clippy --target wasm32-wasip1 --all --all-features` — clean, no warnings
+- [x] `cargo test` — all 72 unit tests pass
+- [x] `cargo build --target wasm32-wasip1 --release` — WASM binary compiles successfully
+- [x] Check WASM binary size — **253KB** (well under 500KB target)
+- [x] Security checklist (spec Section 15):
+  - [x] No secrets handled in WASM code (only `secret_exists` check, no secret values read/stored/logged)
+  - [x] All UUIDs validated before URL interpolation (every handler calls `validate_uuid()` before building paths)
+  - [x] All string inputs length-bounded (`validate_input_length()` on all user text fields)
+  - [x] URL path segments percent-encoded (`url_encode_path()` on all user data in URLs)
+  - [x] HTTP allowlist restricted to `api.zencoder.ai` only (capabilities.json)
+  - [x] No DELETE or PUT methods in allowlist (only GET, POST, PATCH)
+  - [x] Rate limits configured in capabilities (60/min, 1000/hr)
+  - [x] Error messages contain no credential data (only generic status codes and field names)
+  - [x] Status enum values validated before use (`validate_task_status`, `validate_step_status`)
+  - [x] Schedule values range-checked (hour 0-23, minute 0-59, day 0-6)
+  - [x] No `unsafe` code (grep confirmed zero occurrences)
+  - [x] No panic paths in production code (all `unwrap()`/`expect()` confined to `#[cfg(test)]`; production uses `Result` throughout)
+- [x] All verification results recorded
