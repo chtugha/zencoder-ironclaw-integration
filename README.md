@@ -19,7 +19,7 @@ The two convenience actions are the primary interface: `solve_coding_problem` cr
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) 1.85+ with the `wasm32-wasip1` target
+- [Rust](https://rustup.rs/) 1.85+ with the `wasm32-wasip2` target
 - [IronClaw CLI](https://github.com/nearai/ironclaw) 0.25+
 - A Zencoder personal access token (Client ID + Client Secret from [auth.zencoder.ai](https://auth.zencoder.ai))
 
@@ -51,13 +51,13 @@ cargo --version
 ### 3. Add the WASM target
 
 ```bash
-rustup target add wasm32-wasip1
+rustup target add wasm32-wasip2
 ```
 
 Verify:
 
 ```bash
-rustup target list --installed | grep wasm32-wasip1
+rustup target list --installed | grep wasm32-wasip2
 ```
 
 ### 4. Install IronClaw
@@ -89,17 +89,17 @@ ironclaw onboard
 ```bash
 git clone https://github.com/chtugha/zencoder-ironclaw-integration.git
 cd zencoder-ironclaw-integration/zencoder-tool
-cargo build --target wasm32-wasip1 --release
+cargo build --target wasm32-wasip2 --release
 ```
 
-The compiled WASM binary is at `target/wasm32-wasip1/release/zencoder_tool.wasm` (~253KB).
+The compiled WASM binary is at `target/wasm32-wasip2/release/zencoder_tool.wasm` (~253KB).
 
 ### 6. Install the tool into IronClaw
 
 ```bash
 ironclaw tool install \
   --name zencoder-tool \
-  target/wasm32-wasip1/release/zencoder_tool.wasm \
+  target/wasm32-wasip2/release/zencoder_tool.wasm \
   --capabilities zencoder-tool.capabilities.json \
   --skip-build
 ```
@@ -244,7 +244,7 @@ cargo test
 ```bash
 cd zencoder-tool
 cargo fmt --check
-cargo clippy --target wasm32-wasip1 --all --all-features
+cargo clippy --target wasm32-wasip2 --all --all-features
 ```
 
 ## Security
