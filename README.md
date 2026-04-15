@@ -140,13 +140,20 @@ To re-authenticate after token expiry, run `ironclaw tool auth zencoder-tool` ag
 **Manual token fallback**: If `ironclaw tool auth` is not supported in your IronClaw version, you can obtain a token manually and set it directly:
 
 ```bash
-# Get a token manually
-curl -X POST https://fe.zencoder.ai/oauth/token \
-  -H "Content-Type: application/json" \
-  -d '{"client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET", "grant_type": "client_credentials"}'
+# Prompt for credentials without echoing or storing in shell history
+read -rp "Client ID: " ZENCODER_CLIENT_ID
+read -rs -p "Client Secret: " ZENCODER_CLIENT_SECRET && echo
 
-# Set the access_token from the response
+# Exchange for an access token
+curl -s -X POST https://fe.zencoder.ai/oauth/token \
+  -H "Content-Type: application/json" \
+  -d "{\"client_id\": \"$ZENCODER_CLIENT_ID\", \"client_secret\": \"$ZENCODER_CLIENT_SECRET\", \"grant_type\": \"client_credentials\"}"
+
+# Copy the access_token value from the JSON response, then:
 ironclaw secret set zencoder_access_token <paste-access-token-here>
+
+# Clear the variables
+unset ZENCODER_CLIENT_ID ZENCODER_CLIENT_SECRET
 ```
 
 ### 9. Verify the installation
