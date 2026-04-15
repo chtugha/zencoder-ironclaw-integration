@@ -1,5 +1,5 @@
 {
-  "version": "0.2.1",
+  "version": "0.3.0",
   "wit_version": "0.3.0",
   "description": "Manage Zencoder/Zenflow projects, tasks, plans, workflows, and automations. Delegate complex coding problems to Zenflow's AI agents and track their progress.",
   "capabilities": {
@@ -12,8 +12,8 @@
         }
       ],
       "credentials": {
-        "zencoder_api_key": {
-          "secret_name": "zencoder_api_key",
+        "zencoder_access_token": {
+          "secret_name": "zencoder_access_token",
           "location": {
             "type": "bearer"
           },
@@ -26,22 +26,33 @@
       }
     },
     "secrets": {
-      "allowed_names": ["zencoder_api_key"]
+      "allowed_names": [
+        "zencoder_client_id",
+        "zencoder_client_secret",
+        "zencoder_access_token"
+      ]
     }
   },
   "auth": {
-    "secret_name": "zencoder_api_key",
+    "type": "oauth2",
+    "grant_type": "client_credentials",
+    "token_url": "https://fe.zencoder.ai/oauth/token",
+    "client_id_secret": "zencoder_client_id",
+    "client_secret_secret": "zencoder_client_secret",
+    "secret_name": "zencoder_access_token",
     "display_name": "Zencoder",
-    "instructions": "Get your Zencoder API key from the Zencoder dashboard (Settings > API Keys), then paste it here.",
-    "setup_url": "https://app.zencoder.ai/settings",
-    "token_hint": "Starts with 'zen_'",
-    "env_var": "ZENCODER_API_KEY"
+    "instructions": "Generate a personal access token at auth.zencoder.ai (Administration > Settings > Personal Tokens). Copy the Client ID and Client Secret immediately — the secret is only shown once.",
+    "setup_url": "https://auth.zencoder.ai"
   },
   "setup": {
     "required_secrets": [
       {
-        "name": "zencoder_api_key",
-        "prompt": "Zencoder API Key (get one from app.zencoder.ai/settings)"
+        "name": "zencoder_client_id",
+        "prompt": "Zencoder Client ID (from auth.zencoder.ai > Administration > Settings > Personal Tokens)"
+      },
+      {
+        "name": "zencoder_client_secret",
+        "prompt": "Zencoder Client Secret (shown once at token creation)"
       }
     ]
   }

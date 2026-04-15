@@ -21,7 +21,7 @@ The two convenience actions are the primary interface: `solve_coding_problem` cr
 
 - [Rust](https://rustup.rs/) 1.85+ with the `wasm32-wasip1` target
 - [IronClaw CLI](https://github.com/nearai/ironclaw) 0.25+
-- A Zencoder API key (get one from [app.zencoder.ai/settings](https://app.zencoder.ai/settings))
+- A Zencoder personal access token (Client ID + Client Secret from [auth.zencoder.ai](https://auth.zencoder.ai))
 
 ## Installation Guide (Debian 12)
 
@@ -111,17 +111,33 @@ cd ..  # back to zencoder-ironclaw-integration/
 ironclaw tool install ./zencoder-tool
 ```
 
-### 7. Set your Zencoder API key
+### 7. Configure Zencoder OAuth credentials
+
+First, generate a personal access token at [auth.zencoder.ai](https://auth.zencoder.ai):
+
+1. Log in to **auth.zencoder.ai**
+2. Go to **Administration > Settings > Personal Tokens**
+3. Create a new token — copy the **Client ID** and **Client Secret** immediately (the secret is only shown once)
+
+Then provide the credentials to IronClaw:
 
 ```bash
 ironclaw tool setup zencoder-tool
 ```
 
-When prompted, paste your API key (starts with `zen_`, obtained from [app.zencoder.ai/settings](https://app.zencoder.ai/settings)).
+When prompted, paste the **Client ID** and **Client Secret** from the previous step.
 
-The key is stored securely by IronClaw and injected as a Bearer token on API requests — it never enters the WASM sandbox.
+### 8. Authenticate (OAuth token exchange)
 
-### 8. Verify the installation
+```bash
+ironclaw tool auth zencoder-tool
+```
+
+This exchanges your Client ID and Client Secret for a JWT access token via Zencoder's OAuth2 `client_credentials` flow. The token is valid for 24 hours. IronClaw handles token injection automatically — credentials never enter the WASM sandbox.
+
+To re-authenticate after token expiry, run `ironclaw tool auth zencoder-tool` again.
+
+### 9. Verify the installation
 
 ```bash
 ironclaw tool list
