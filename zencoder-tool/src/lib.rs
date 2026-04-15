@@ -296,12 +296,22 @@ impl exports::near::agent::tool::Guest for ZencoderTool {
 
 fn ensure_auth_configured() -> Result<(), String> {
     let has_token = near::agent::host::secret_exists("zencoder_access_token");
-    let has_client_id = near::agent::host::secret_exists("zencoder_client_id");
-    let has_client_secret = near::agent::host::secret_exists("zencoder_client_secret");
-
     if has_token {
         return Ok(());
     }
+
+    let has_legacy_key = near::agent::host::secret_exists("zencoder_api_key");
+    if has_legacy_key {
+        near::agent::host::log(
+            near::agent::host::LogLevel::Warn,
+            "Found legacy 'zencoder_api_key' secret. The tool now uses OAuth2 \
+             (client_id + client_secret). Run 'ironclaw tool setup zencoder-tool' \
+             to reconfigure.",
+        );
+    }
+
+    let has_client_id = near::agent::host::secret_exists("zencoder_client_id");
+    let has_client_secret = near::agent::host::secret_exists("zencoder_client_secret");
 
     if !has_client_id || !has_client_secret {
         return Err(
@@ -311,14 +321,18 @@ fn ensure_auth_configured() -> Result<(), String> {
              (generate them at https://auth.zencoder.ai > Administration > Settings > Personal Tokens).\n\
              Then run:\n\
              \n  ironclaw tool auth zencoder-tool\n\
-             \nto complete the OAuth token exchange."
+             \nto complete the OAuth token exchange.\n\
+             \nAlternatively, set the token manually:\n\
+             \n  ironclaw secret set zencoder_access_token <your-jwt-token>"
                 .into(),
         );
     }
 
     Err("Zencoder OAuth token not yet obtained. Run:\n\
          \n  ironclaw tool auth zencoder-tool\n\
-         \nto exchange your Client ID and Client Secret for an access token."
+         \nto exchange your Client ID and Client Secret for an access token.\n\
+         \nAlternatively, set the token manually:\n\
+         \n  ironclaw secret set zencoder_access_token <your-jwt-token>"
         .into())
 }
 
@@ -396,7 +410,7 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                 } else if resp.status == 401 {
                     return Err(
                         "Zencoder API returned 401 Unauthorized. Your OAuth token may have \
-                         expired (tokens last 24 hours). Re-authenticate with:\n\
+                         expired. Re-authenticate with:\n\
                          \n  ironclaw tool auth zencoder-tool"
                             .into(),
                     );

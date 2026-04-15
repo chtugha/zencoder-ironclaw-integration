@@ -133,9 +133,21 @@ When prompted, paste the **Client ID** and **Client Secret** from the previous s
 ironclaw tool auth zencoder-tool
 ```
 
-This exchanges your Client ID and Client Secret for a JWT access token via Zencoder's OAuth2 `client_credentials` flow. The token is valid for 24 hours. IronClaw handles token injection automatically — credentials never enter the WASM sandbox.
+This exchanges your Client ID and Client Secret for a JWT access token via Zencoder's OAuth2 `client_credentials` flow. IronClaw handles token injection automatically — credentials never enter the WASM sandbox.
 
 To re-authenticate after token expiry, run `ironclaw tool auth zencoder-tool` again.
+
+**Manual token fallback**: If `ironclaw tool auth` is not supported in your IronClaw version, you can obtain a token manually and set it directly:
+
+```bash
+# Get a token manually
+curl -X POST https://fe.zencoder.ai/oauth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET", "grant_type": "client_credentials"}'
+
+# Set the access_token from the response
+ironclaw secret set zencoder_access_token <paste-access-token-here>
+```
 
 ### 9. Verify the installation
 

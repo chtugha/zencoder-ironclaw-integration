@@ -29,7 +29,8 @@
       "allowed_names": [
         "zencoder_client_id",
         "zencoder_client_secret",
-        "zencoder_access_token"
+        "zencoder_access_token",
+        "zencoder_api_key"
       ]
     }
   },
