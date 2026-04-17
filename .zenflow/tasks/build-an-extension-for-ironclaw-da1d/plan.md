@@ -145,10 +145,10 @@ Reference: spec Sections 8, 10, 14.1.
 Final build, lint, format check, WASM compilation, and security audit against the spec's checklist.
 
 - [x] `cargo fmt --check` — formatting issues found and fixed via `cargo fmt`
-- [x] `cargo clippy --target wasm32-wasip1 --all --all-features` — clean, no warnings
-- [x] `cargo test` — all 72 unit tests pass
-- [x] `cargo build --target wasm32-wasip1 --release` — WASM binary compiles successfully
-- [x] Check WASM binary size — **253KB** (well under 500KB target)
+- [x] `cargo clippy --target wasm32-wasip2 --all --all-features` — clean, no warnings
+- [x] `cargo test` — all 73 unit tests pass
+- [x] `cargo build --target wasm32-wasip2 --release` — WASM binary compiles successfully
+- [x] Check WASM binary size — **280KB** (well under 500KB target)
 - [x] Security checklist (spec Section 15):
   - [x] No secrets handled in WASM code (only `secret_exists` check, no secret values read/stored/logged)
   - [x] All UUIDs validated before URL interpolation (every handler calls `validate_uuid()` before building paths)
