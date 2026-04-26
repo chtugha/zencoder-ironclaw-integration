@@ -310,12 +310,10 @@ impl exports::near::agent::tool::Guest for ZencoderTool {
     fn description() -> String {
         "Zencoder/Zenflow integration for managing projects, tasks, plans, workflows, and \
          automations. Delegate complex coding problems to Zenflow's AI agents and track their \
-         progress. Authentication uses a Zencoder JWT access token — obtain one via the OAuth2 \
-         client_credentials exchange at https://fe.zencoder.ai/oauth/token, then install it \
-         with the bundled helper (`scripts/zencoder-auth.sh` / `.ps1`) or via \
-         'ironclaw tool auth zencoder-tool' (interactive paste-the-JWT prompt). To avoid \
-         leaking the token through shell history / process list, prefer piping it: \
-         `printf %s '<jwt>' | ironclaw secret set zencoder_access_token --stdin`."
+         progress. Authentication uses a Zencoder JWT access token — run the bundled helper \
+         (`scripts/zencoder-auth.sh` / `.ps1`) to exchange your Client ID and Client Secret \
+         for a JWT, then paste it into IronClaw via \
+         'ironclaw tool auth zencoder-tool'."
             .to_string()
     }
 }
