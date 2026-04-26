@@ -175,28 +175,8 @@ At the prompt:
 - **Paste the token** printed by the helper when asked `Paste your token:`
 - IronClaw validates it against `GET https://api.zencoder.ai/api/v1/projects` and reports `✓` or `✗`
 
-#### Manual fallback (no helper script)
 
-If you prefer the exchange by hand (requires `jq`):
-
-```bash
-read -rp  "Client ID: "     ZENCODER_CLIENT_ID
-read -rsp "Client Secret: " ZENCODER_CLIENT_SECRET && echo
-
-BODY=$(jq -nc --arg id "$ZENCODER_CLIENT_ID" --arg sec "$ZENCODER_CLIENT_SECRET" \
-  '{client_id:$id, client_secret:$sec, grant_type:"client_credentials"}')
-
-JWT=$(curl -fsS -X POST https://fe.zencoder.ai/oauth/token \
-  -H 'Content-Type: application/json' \
-  --data-binary "$BODY" | jq -r .access_token)
-
-unset BODY ZENCODER_CLIENT_ID ZENCODER_CLIENT_SECRET
-echo "$JWT"   # copy the token printed here
-```
-
-Then paste it via `ironclaw tool auth zencoder-tool` as in Step 3 above.
-
-PowerShell equivalent:
+PowerShell manual method:
 
 ```powershell
 $cid = Read-Host 'Client ID'
