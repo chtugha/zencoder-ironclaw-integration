@@ -27,34 +27,21 @@
     },
     "secrets": {
       "allowed_names": [
-        "zencoder_client_id",
-        "zencoder_client_secret",
-        "zencoder_access_token",
-        "zencoder_api_key"
+        "zencoder_access_token"
       ]
     }
   },
   "auth": {
-    "type": "oauth2",
-    "grant_type": "client_credentials",
-    "token_url": "https://fe.zencoder.ai/oauth/token",
-    "client_id_secret": "zencoder_client_id",
-    "client_secret_secret": "zencoder_client_secret",
     "secret_name": "zencoder_access_token",
     "display_name": "Zencoder",
-    "instructions": "Generate a personal access token at auth.zencoder.ai (Administration > Settings > Personal Tokens). Copy the Client ID and Client Secret immediately — the secret is only shown once.",
-    "setup_url": "https://auth.zencoder.ai"
-  },
-  "setup": {
-    "required_secrets": [
-      {
-        "name": "zencoder_client_id",
-        "prompt": "Zencoder Client ID (from auth.zencoder.ai > Administration > Settings > Personal Tokens)"
-      },
-      {
-        "name": "zencoder_client_secret",
-        "prompt": "Zencoder Client Secret (shown once at token creation)"
-      }
-    ]
+    "env_var": "ZENCODER_ACCESS_TOKEN",
+    "token_hint": "JWT access token (three base64url segments separated by dots)",
+    "setup_url": "https://auth.zencoder.ai",
+    "validation_endpoint": {
+      "url": "https://api.zencoder.ai/api/v1/projects",
+      "method": "GET",
+      "success_status": 200
+    },
+    "instructions": "Zencoder uses an OAuth2 client_credentials exchange that IronClaw cannot perform itself. Obtain a JWT access token first, then paste it here.\n\n1. Generate a personal access token at https://auth.zencoder.ai (Administration > Settings > Personal Tokens). Copy the Client ID and Client Secret immediately — the secret is only shown once.\n\n2. Exchange the credentials for an access token (run in bash/zsh):\n\n   curl -s -X POST https://fe.zencoder.ai/oauth/token \\\n     -H 'Content-Type: application/json' \\\n     -d '{\"client_id\":\"<CLIENT_ID>\",\"client_secret\":\"<CLIENT_SECRET>\",\"grant_type\":\"client_credentials\"}'\n\n3. Copy the access_token value from the JSON response and paste it at the prompt below.\n\nTip: pipe the response through jq -r .access_token to avoid copying by hand. Single quotes around the JSON body avoid shell smart-quote issues."
   }
 }

@@ -288,53 +288,39 @@ impl exports::near::agent::tool::Guest for ZencoderTool {
     fn description() -> String {
         "Zencoder/Zenflow integration for managing projects, tasks, plans, workflows, and \
          automations. Delegate complex coding problems to Zenflow's AI agents and track their \
-         progress. Authentication uses OAuth2 client_credentials flow — run 'ironclaw tool setup \
-         zencoder-tool' then 'ironclaw tool auth zencoder-tool' to configure."
+         progress. Authentication uses a Zencoder JWT access token — obtain one via the OAuth2 \
+         client_credentials exchange at https://fe.zencoder.ai/oauth/token, then run \
+         'ironclaw tool auth zencoder-tool' (or 'ironclaw secret set zencoder_access_token <jwt>') \
+         to install it."
             .to_string()
     }
 }
 
 fn ensure_auth_configured() -> Result<(), String> {
-    let has_token = near::agent::host::secret_exists("zencoder_access_token");
-    if has_token {
+    if near::agent::host::secret_exists("zencoder_access_token") {
         return Ok(());
     }
 
-    let has_legacy_key = near::agent::host::secret_exists("zencoder_api_key");
-    if has_legacy_key {
-        near::agent::host::log(
-            near::agent::host::LogLevel::Warn,
-            "Found legacy 'zencoder_api_key' secret. The tool now uses OAuth2 \
-             (client_id + client_secret). Run 'ironclaw tool setup zencoder-tool' \
-             to reconfigure.",
-        );
-    }
-
-    let has_client_id = near::agent::host::secret_exists("zencoder_client_id");
-    let has_client_secret = near::agent::host::secret_exists("zencoder_client_secret");
-
-    if !has_client_id || !has_client_secret {
-        return Err(
-            "Zencoder OAuth credentials not configured. Run:\n\
-             \n  ironclaw tool setup zencoder-tool\n\
-             \nto provide your Client ID and Client Secret \
-             (generate them at https://auth.zencoder.ai > Administration > Settings > Personal Tokens).\n\
-             Then run:\n\
-             \n  ironclaw tool auth zencoder-tool\n\
-             \nto complete the OAuth token exchange.\n\
-             \nAlternatively, set the token manually:\n\
-             \n  ironclaw secret set zencoder_access_token <your-jwt-token>"
-                .into(),
-        );
-    }
-
-    Err("Zencoder OAuth token not yet obtained. Run:\n\
-         \n  ironclaw tool auth zencoder-tool\n\
-         \nto exchange your Client ID and Client Secret for an access token.\n\
-         \nAlternatively, set the token manually:\n\
-         \n  ironclaw secret set zencoder_access_token <your-jwt-token>"
-        .into())
+    Err(AUTH_NOT_CONFIGURED_ERROR.into())
 }
+
+const AUTH_NOT_CONFIGURED_ERROR: &str = "Zencoder access token not configured.
+
+1. Generate a personal access token at https://auth.zencoder.ai (Administration > Settings > Personal Tokens) and copy the Client ID + Client Secret.
+
+2. Exchange them for a JWT access token:
+
+     curl -s -X POST https://fe.zencoder.ai/oauth/token \\
+       -H 'Content-Type: application/json' \\
+       -d '{\"client_id\":\"<ID>\",\"client_secret\":\"<SECRET>\",\"grant_type\":\"client_credentials\"}'
+
+3. Install the access_token value with either:
+
+     ironclaw secret set zencoder_access_token <jwt>
+
+   or (interactive paste-the-JWT prompt with validation):
+
+     ironclaw tool auth zencoder-tool";
 
 fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String, String> {
     let url = format!("{}{}", API_BASE_URL, path);
@@ -409,9 +395,11 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                     continue;
                 } else if resp.status == 401 {
                     return Err(
-                        "Zencoder API returned 401 Unauthorized. Your OAuth token may have \
-                         expired. Re-authenticate with:\n\
-                         \n  ironclaw tool auth zencoder-tool"
+                        "Zencoder API returned 401 Unauthorized. Your access token may have \
+                         expired. Obtain a fresh JWT via the curl exchange against \
+                         https://fe.zencoder.ai/oauth/token and reinstall it with:\n\
+                         \n  ironclaw tool auth zencoder-tool\n\
+                         \n(or: ironclaw secret set zencoder_access_token <jwt>)"
                             .into(),
                     );
                 } else {
@@ -1906,5 +1894,53 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
         let one_of = parsed.get("oneOf").unwrap().as_array().unwrap();
         assert_eq!(one_of.len(), 17);
+    }
+
+    #[test]
+    fn test_auth_not_configured_error_has_no_blank_continuation_lines() {
+        let msg = AUTH_NOT_CONFIGURED_ERROR;
+
+        let lines: Vec<&str> = msg.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim_end().ends_with('\\') {
+                let next = lines.get(i + 1).copied().unwrap_or("");
+                assert!(
+                    !next.trim().is_empty(),
+                    "blank line follows shell line-continuation at line {}: \
+                     copy-pasting this curl command would break in bash/zsh.\n\
+                     Full message:\n{}",
+                    i,
+                    msg
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_auth_not_configured_error_mentions_required_commands() {
+        let msg = AUTH_NOT_CONFIGURED_ERROR;
+        for needle in [
+            "https://fe.zencoder.ai/oauth/token",
+            "ironclaw secret set zencoder_access_token",
+            "ironclaw tool auth zencoder-tool",
+            "client_credentials",
+        ] {
+            assert!(
+                msg.contains(needle),
+                "expected error message to mention `{}`; got:\n{}",
+                needle,
+                msg
+            );
+        }
+    }
+
+    #[test]
+    fn test_auth_not_configured_error_uses_single_quoted_json() {
+        let msg = AUTH_NOT_CONFIGURED_ERROR;
+        assert!(
+            msg.contains("-d '{\"client_id\":"),
+            "curl JSON body must be wrapped in single quotes (smart-quote-safe); got:\n{}",
+            msg
+        );
     }
 }
