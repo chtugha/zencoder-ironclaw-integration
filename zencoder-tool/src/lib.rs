@@ -330,26 +330,23 @@ fn ensure_auth_configured() -> Result<(), String> {
 
 const AUTH_NOT_CONFIGURED_ERROR: &str = "Zencoder access token not configured.
 
-1. Generate a personal access token at https://auth.zencoder.ai (Administration > Settings > Personal Tokens) and copy the Client ID + Client Secret.
+1. Generate a personal access token at https://auth.zencoder.ai
+   (Administration > Settings > Personal Tokens) — copy the Client ID
+   and Client Secret immediately (the secret is shown only once).
 
-2. Run the bundled helper, which prompts for the credentials, exchanges them, and installs the JWT for you (avoids leaking the token via shell history / process list):
+2. Run the bundled helper to exchange them for a JWT:
 
-     scripts/zencoder-auth.sh           # bash / zsh
+     scripts/zencoder-auth.sh           # bash / zsh / WSL
      scripts\\zencoder-auth.ps1          # PowerShell
 
-   Or do the OAuth2 client_credentials exchange manually with curl:
+   The helper prints the JWT to your terminal.
 
-     curl -s -X POST https://fe.zencoder.ai/oauth/token \\
-       -H 'Content-Type: application/json' \\
-       -d '{\"client_id\":\"<ID>\",\"client_secret\":\"<SECRET>\",\"grant_type\":\"client_credentials\"}'
+3. Paste the JWT into IronClaw:
 
-3. Install the access_token value WITHOUT putting it on the command line:
+     ironclaw tool auth zencoder-tool
 
-     printf %s '<jwt>' | ironclaw secret set zencoder_access_token --stdin
-
-   or (interactive paste-the-JWT prompt with validation):
-
-     ironclaw tool auth zencoder-tool";
+   At the prompt, press 's' to skip the browser step (headless containers),
+   then paste the token when asked 'Paste your token:'.";
 
 fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String, String> {
     let url = format!("{}{}", API_BASE_URL, path);
@@ -432,12 +429,16 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                 } else if resp.status == 401 {
                     return Err(
                         "Zencoder API returned 401 Unauthorized. Your access token may have \
-                         expired. Obtain a fresh JWT via the bundled helper \
-                         (`scripts/zencoder-auth.sh` / `.ps1`) or by repeating the OAuth2 \
-                         client_credentials curl exchange against \
-                         https://fe.zencoder.ai/oauth/token, then reinstall it with:\n\
-                         \n  printf %s '<jwt>' | ironclaw secret set zencoder_access_token --stdin\n\
-                         \n(or interactive: ironclaw tool auth zencoder-tool)"
+                         expired.\n\
+                         \n\
+                         Re-run the bundled helper to get a fresh JWT:\n\
+                         \n  scripts/zencoder-auth.sh        # bash / zsh / WSL\n\
+                         \n  scripts\\zencoder-auth.ps1       # PowerShell\n\
+                         \n\
+                         Then paste it into IronClaw:\n\
+                         \n  ironclaw tool auth zencoder-tool\n\
+                         \n\
+                         (Press 's' to skip the browser step on headless containers.)"
                             .into(),
                     );
                 } else {
@@ -1976,10 +1977,9 @@ mod tests {
     fn test_auth_not_configured_error_mentions_required_commands() {
         let msg = AUTH_NOT_CONFIGURED_ERROR;
         for needle in [
-            "https://fe.zencoder.ai/oauth/token",
-            "ironclaw secret set zencoder_access_token",
+            "https://auth.zencoder.ai",
+            "scripts/zencoder-auth.sh",
             "ironclaw tool auth zencoder-tool",
-            "client_credentials",
         ] {
             assert!(
                 msg.contains(needle),
@@ -2012,11 +2012,11 @@ mod tests {
     }
 
     #[test]
-    fn test_auth_not_configured_error_uses_single_quoted_json() {
+    fn test_auth_not_configured_error_paste_prompt_mentioned() {
         let msg = AUTH_NOT_CONFIGURED_ERROR;
         assert!(
-            msg.contains("-d '{\"client_id\":"),
-            "curl JSON body must be wrapped in single quotes (smart-quote-safe); got:\n{}",
+            msg.contains("Paste your token:"),
+            "error message must tell the user what IronClaw will prompt for; got:\n{}",
             msg
         );
     }

@@ -1,63 +1,54 @@
 #!/usr/bin/env bash
 #
-# zencoder-auth.sh — one-shot Zencoder OAuth client_credentials helper
+# zencoder-auth.sh — Zencoder OAuth client_credentials token helper
 #
 # Why this exists:
-#   IronClaw's `ironclaw tool auth <name>` does NOT implement the OAuth2
-#   client_credentials grant (its built-in flows are authorization_code+PKCE
-#   and "paste the token"). Zencoder's token endpoint only supports
-#   client_credentials. So the exchange has to happen outside IronClaw.
+#   IronClaw's `ironclaw tool auth <name>` supports two flows:
+#     1. OAuth authorization_code + PKCE (browser redirect)
+#     2. Manual "paste the token" prompt
+#   Zencoder's token endpoint (https://fe.zencoder.ai/oauth/token) only
+#   supports client_credentials — a server-to-server grant with no browser
+#   redirect. So the exchange must happen outside IronClaw.
 #
-#   This script does the exchange, then installs the resulting JWT as the
-#   IronClaw secret `zencoder_access_token` so the WASM tool can use it.
+#   This script does the exchange, prints the resulting JWT, and tells you
+#   exactly how to install it via `ironclaw tool auth zencoder-tool`.
 #
 # Usage:
 #   scripts/zencoder-auth.sh [--client-id ID] [--client-secret SECRET]
-#                            [--secret-name NAME] [--print-only]
-#                            [--token-url URL] [--no-set]
+#                            [--token-url URL]
 #
 # Flags:
 #   --client-id ID         Use ID instead of prompting.
 #   --client-secret SECRET Use SECRET instead of prompting (NOT recommended;
 #                          appears in shell history / process list).
-#   --secret-name NAME     IronClaw secret to write (default: zencoder_access_token).
 #   --token-url URL        Override the OAuth token endpoint
 #                          (default: https://fe.zencoder.ai/oauth/token).
-#   --print-only           Print the JWT and DO NOT call `ironclaw secret set`.
-#                          Useful on machines without IronClaw, or for piping.
-#   --no-set               Alias for --print-only.
 #   -h, --help             Show this help.
 #
 # Exit codes:
-#   0   success
+#   0   success (JWT printed and instructions shown)
 #   1   bad usage / missing dependency
 #   2   credential prompt aborted
 #   3   token endpoint returned non-2xx
 #   4   token response did not contain access_token
-#   5   `ironclaw secret set` failed
 
 set -euo pipefail
 
 TOKEN_URL_DEFAULT="https://fe.zencoder.ai/oauth/token"
-SECRET_NAME_DEFAULT="zencoder_access_token"
 
 print_help() {
-    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 CLIENT_ID=""
 CLIENT_SECRET=""
-SECRET_NAME="$SECRET_NAME_DEFAULT"
 TOKEN_URL="$TOKEN_URL_DEFAULT"
-PRINT_ONLY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --client-id)        CLIENT_ID="$2"; shift 2 ;;
         --client-secret)    CLIENT_SECRET="$2"; shift 2 ;;
-        --secret-name)      SECRET_NAME="$2"; shift 2 ;;
         --token-url)        TOKEN_URL="$2"; shift 2 ;;
-        --print-only|--no-set) PRINT_ONLY=1; shift ;;
         -h|--help)          print_help; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; print_help >&2; exit 1 ;;
     esac
@@ -72,14 +63,6 @@ need() {
     }
 }
 need curl
-
-if [ "$PRINT_ONLY" -eq 0 ]; then
-    if ! command -v ironclaw >/dev/null 2>&1; then
-        echo "ERROR: 'ironclaw' not in PATH. Install it first, or rerun with --print-only" >&2
-        echo "       to print the JWT and install it manually." >&2
-        exit 1
-    fi
-fi
 
 # Pick a JSON parser. Prefer jq, fall back to python3, fall back to sed.
 JSON_EXTRACTOR=""
@@ -102,17 +85,12 @@ extract_json_field() {
             jq -r --arg f "$1" '.[$f] // empty'
             ;;
         python3|python)
-            # Pass the field name via argv (sys.argv[1]) instead of
-            # interpolating it into the source — prevents quote-injection
-            # if the field name ever becomes user-controlled.
             "$JSON_EXTRACTOR" -c 'import json,sys
 d=json.load(sys.stdin)
 v=d.get(sys.argv[1],"") if isinstance(d,dict) else ""
 print("" if v is None else v)' "$1"
             ;;
         sed)
-            # Match either a JSON string ("...") or a JSON number/boolean
-            # (bare token). The first capture group wins.
             input=$(cat)
             val=$(printf '%s' "$input" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n1)
             if [ -z "$val" ]; then
@@ -143,9 +121,6 @@ if [ -z "$CLIENT_SECRET" ]; then
         echo "ERROR: --client-secret not supplied and stdin is not a terminal." >&2
         exit 2
     fi
-    # Read with echo disabled. A trap restores echo on Ctrl-C, kill, or any
-    # unexpected exit — without it `set -e` would leave the user's terminal
-    # in no-echo mode if they cancel the prompt.
     if [ -t 0 ] && stty -echo 2>/dev/null; then
         restore_echo() { stty echo 2>/dev/null || true; printf '\n'; }
         trap 'restore_echo' INT TERM HUP EXIT
@@ -154,7 +129,6 @@ if [ -z "$CLIENT_SECRET" ]; then
         trap - INT TERM HUP EXIT
         restore_echo
     else
-        # Fallback for shells without stty.
         printf "Zencoder Client Secret (will be visible): "
         IFS= read -r CLIENT_SECRET || { echo; exit 2; }
     fi
@@ -166,9 +140,6 @@ fi
 
 # --- exchange ------------------------------------------------------------
 
-# Build the JSON body with python or printf — never with shell interpolation
-# directly into single-quoted curl args, so users can't be tripped up by
-# special characters in the secret.
 build_json_body() {
     if command -v jq >/dev/null 2>&1; then
         jq -nc --arg id "$CLIENT_ID" --arg sec "$CLIENT_SECRET" \
@@ -183,12 +154,6 @@ print(json.dumps({
 }))
 ' "$CLIENT_ID" "$CLIENT_SECRET"
     else
-        # Last-resort sed escaper. JSON forbids U+0000–U+001F inside string
-        # literals; if the credentials contain any control character (CR
-        # from a Windows clipboard paste, embedded newline, tab, …) we
-        # cannot construct a valid body without proper escaping. Refuse
-        # rather than send malformed JSON the server will reject as
-        # ER-00006 ("Invalid input json").
         if printf '%s%s' "$CLIENT_ID" "$CLIENT_SECRET" | LC_ALL=C grep -q '[[:cntrl:]]'; then
             echo "ERROR: Client ID/Secret contains a control character (CR, LF, tab, …)." >&2
             echo "       Cannot construct safe JSON without jq or python3 — install one of:" >&2
@@ -205,8 +170,6 @@ print(json.dumps({
 
 JSON_BODY=$(build_json_body)
 
-# Send the request and capture body + http status separately.
-# `--data-binary` avoids any --data quirks; -w prints the trailing status.
 HTTP_RESPONSE=$(
     printf '%s' "$JSON_BODY" |
         curl -sS -X POST "$TOKEN_URL" \
@@ -239,29 +202,28 @@ if [ -z "$ACCESS_TOKEN" ]; then
     exit 4
 fi
 
-# --- install or print ----------------------------------------------------
+# --- print JWT + instructions -------------------------------------------
 
-if [ "$PRINT_ONLY" -eq 1 ]; then
-    printf '%s\n' "$ACCESS_TOKEN"
-    exit 0
-fi
-
-if ! printf '%s' "$ACCESS_TOKEN" | ironclaw secret set "$SECRET_NAME" --stdin >/dev/null 2>&1; then
-    # Fallback: not every IronClaw build supports --stdin. Try positional,
-    # but warn loudly first — argv is visible in the OS process list.
-    echo "WARNING: Falling back to positional 'ironclaw secret set $SECRET_NAME <token>'." >&2
-    echo "         Your IronClaw build does not accept --stdin; the JWT will be briefly" >&2
-    echo "         visible in 'ps' / process listings. Upgrade IronClaw to avoid this." >&2
-    if ! ironclaw secret set "$SECRET_NAME" "$ACCESS_TOKEN" >/dev/null 2>&1; then
-        echo "ERROR: 'ironclaw secret set $SECRET_NAME ...' failed." >&2
-        echo "       Token (copy this and set it manually):" >&2
-        printf '%s\n' "$ACCESS_TOKEN" >&2
-        exit 5
-    fi
-fi
-
-echo "OK: stored Zencoder JWT in IronClaw secret '$SECRET_NAME'."
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  ✓ JWT obtained successfully                                 ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
 if [ -n "${EXPIRES_IN:-}" ]; then
-    echo "    Token lifetime: ${EXPIRES_IN}s (re-run this script to rotate)."
+    echo "  Token lifetime: ${EXPIRES_IN}s (re-run this script to rotate)"
+    echo ""
 fi
-echo "    Validate with: ironclaw tool auth zencoder-tool"
+echo "  Your Zencoder access token:"
+echo ""
+printf '%s\n' "$ACCESS_TOKEN"
+echo ""
+echo "  ─────────────────────────────────────────────────────────────"
+echo "  Next step — paste it into IronClaw:"
+echo ""
+echo "    ironclaw tool auth zencoder-tool"
+echo ""
+echo "  At the prompt:"
+echo "    • Press 's' to skip the browser-open step (headless containers)"
+echo "    • Paste the token above when asked 'Paste your token:'"
+echo "    • IronClaw will validate it against the Zencoder API"
+echo "  ─────────────────────────────────────────────────────────────"

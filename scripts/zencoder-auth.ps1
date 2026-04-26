@@ -1,12 +1,17 @@
 <#
 .SYNOPSIS
-    Zencoder OAuth client_credentials helper for IronClaw (PowerShell).
+    Zencoder OAuth client_credentials token helper for IronClaw (PowerShell).
 
 .DESCRIPTION
-    IronClaw's `ironclaw tool auth <name>` does NOT implement the OAuth2
-    client_credentials grant — Zencoder's token endpoint only supports
-    that grant — so this script does the exchange and installs the
-    resulting JWT as the IronClaw secret `zencoder_access_token`.
+    IronClaw's `ironclaw tool auth <name>` supports two flows:
+      1. OAuth authorization_code + PKCE (browser redirect)
+      2. Manual "paste the token" prompt
+    Zencoder's token endpoint only supports client_credentials — a server-to-
+    server grant with no browser redirect — so IronClaw cannot perform the
+    exchange itself.
+
+    This script does the exchange, prints the resulting JWT, and tells you
+    exactly how to install it via `ironclaw tool auth zencoder-tool`.
 
 .PARAMETER ClientId
     Zencoder Client ID. Prompted interactively if omitted.
@@ -14,37 +19,22 @@
 .PARAMETER ClientSecret
     Zencoder Client Secret as SecureString. Prompted (hidden) if omitted.
 
-.PARAMETER SecretName
-    IronClaw secret to write. Default: zencoder_access_token.
-
 .PARAMETER TokenUrl
     OAuth token endpoint. Default: https://fe.zencoder.ai/oauth/token.
 
-.PARAMETER PrintOnly
-    Print the JWT to stdout and DO NOT call `ironclaw secret set`.
-
 .EXAMPLE
     .\zencoder-auth.ps1
-    .\zencoder-auth.ps1 -PrintOnly
+    .\zencoder-auth.ps1 -ClientId "a936..." -TokenUrl "https://fe.zencoder.ai/oauth/token"
 #>
 
 [CmdletBinding()]
 param(
     [string]       $ClientId,
     [SecureString] $ClientSecret,
-    [string]       $SecretName = 'zencoder_access_token',
-    [string]       $TokenUrl   = 'https://fe.zencoder.ai/oauth/token',
-    [switch]       $PrintOnly
+    [string]       $TokenUrl = 'https://fe.zencoder.ai/oauth/token'
 )
 
 $ErrorActionPreference = 'Stop'
-
-if (-not $PrintOnly) {
-    if (-not (Get-Command ironclaw -ErrorAction SilentlyContinue)) {
-        Write-Error "'ironclaw' not in PATH. Install it first or rerun with -PrintOnly."
-        exit 1
-    }
-}
 
 if (-not $ClientId) {
     $ClientId = Read-Host -Prompt 'Zencoder Client ID'
@@ -88,29 +78,26 @@ if (-not $resp.access_token) {
 
 $token = [string]$resp.access_token
 
-if ($PrintOnly) {
-    Write-Output $token
-    exit 0
-}
-
-# Try `ironclaw secret set <name> --stdin` first; fall back to positional.
-$setOk = $false
-try {
-    $token | & ironclaw secret set $SecretName --stdin | Out-Null
-    if ($LASTEXITCODE -eq 0) { $setOk = $true }
-} catch { $setOk = $false }
-
-if (-not $setOk) {
-    Write-Warning "Falling back to positional 'ironclaw secret set <name> <token>'. The JWT will be briefly visible in the OS process list — upgrade IronClaw to a build supporting --stdin to avoid this."
-    & ironclaw secret set $SecretName $token | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error ("'ironclaw secret set $SecretName' failed. Token (set manually):`n{0}" -f $token)
-        exit 5
-    }
-}
-
-Write-Host ("OK: stored Zencoder JWT in IronClaw secret '{0}'." -f $SecretName)
+Write-Host ""
+Write-Host "╔══════════════════════════════════════════════════════════════╗"
+Write-Host "║  ✓ JWT obtained successfully                                 ║"
+Write-Host "╚══════════════════════════════════════════════════════════════╝"
+Write-Host ""
 if ($resp.expires_in) {
-    Write-Host ("    Token lifetime: {0}s (rerun this script to rotate)." -f $resp.expires_in)
+    Write-Host ("  Token lifetime: {0}s (re-run this script to rotate)" -f $resp.expires_in)
+    Write-Host ""
 }
-Write-Host '    Validate with: ironclaw tool auth zencoder-tool'
+Write-Host "  Your Zencoder access token:"
+Write-Host ""
+Write-Output $token
+Write-Host ""
+Write-Host "  ─────────────────────────────────────────────────────────────"
+Write-Host "  Next step — paste it into IronClaw:"
+Write-Host ""
+Write-Host "    ironclaw tool auth zencoder-tool"
+Write-Host ""
+Write-Host "  At the prompt:"
+Write-Host "    * Press 's' to skip the browser-open step (headless / no browser)"
+Write-Host "    * Paste the token above when asked 'Paste your token:'"
+Write-Host "    * IronClaw will validate it against the Zencoder API"
+Write-Host "  ─────────────────────────────────────────────────────────────"

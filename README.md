@@ -124,29 +124,35 @@ ironclaw tool install ./zencoder-tool
 > # Hash should change every time the wasm or capabilities JSON changes.
 > ```
 
-### 7. Obtain a Zencoder access token
+### 7. Obtain and install a Zencoder access token
 
-> **Why this is two steps and not one.** IronClaw's built-in `ironclaw tool auth <name>` only knows two flows: an `authorization_code` + PKCE browser redirect, and a "paste the token here" prompt. Zencoder's `https://fe.zencoder.ai/oauth/token` only supports the OAuth2 `client_credentials` grant, which IronClaw does not implement (verified against the `nearai/ironclaw` `main` branch — `AuthCapabilitySchema` recognises only the browser/manual flows; the `client_credentials` code in `src/tools/mcp/auth.rs` is for MCP servers, not WASM tools). So we ship a small helper that performs the exchange and writes the resulting JWT into the IronClaw secret store.
+> **Why the helper script exists.** IronClaw's `ironclaw tool auth` supports two flows: browser OAuth (`authorization_code` + PKCE) and a manual "paste the token" prompt. Zencoder's token endpoint only supports `client_credentials` — a server-to-server grant with no browser redirect — which IronClaw cannot perform. The bundled helper does the credential exchange and prints the resulting JWT; you then paste it into `ironclaw tool auth`.
 
-First, generate a personal access token at [auth.zencoder.ai](https://auth.zencoder.ai):
+**Step 1 — generate a personal access token at [auth.zencoder.ai](https://auth.zencoder.ai):**
 
 1. Log in to **auth.zencoder.ai**
 2. Go to **Administration > Settings > Personal Tokens**
 3. Create a new token — copy the **Client ID** and **Client Secret** immediately (the secret is only shown once)
 
-#### Recommended: use the bundled helper
-
-The repo ships `scripts/zencoder-auth.sh` (bash) and `scripts/zencoder-auth.ps1` (PowerShell). Both prompt for the Client ID + Client Secret (the secret is read with terminal echo disabled), call `https://fe.zencoder.ai/oauth/token`, and store the returned JWT as the IronClaw secret `zencoder_access_token`.
+**Step 2 — run the helper to get the JWT:**
 
 **Linux / macOS / WSL (bash):**
 
 ```bash
 ./scripts/zencoder-auth.sh
-# Zencoder Client ID: ...
-# Zencoder Client Secret: ...
-# OK: stored Zencoder JWT in IronClaw secret 'zencoder_access_token'.
-#     Token lifetime: 86400s (re-run this script to rotate).
-#     Validate with: ironclaw tool auth zencoder-tool
+# Zencoder Client ID: <paste Client ID>
+# Zencoder Client Secret: <paste Client Secret, hidden>
+#
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  ✓ JWT obtained successfully                                 ║
+# ╚══════════════════════════════════════════════════════════════╝
+#
+#   Your Zencoder access token:
+#
+#   eyJhbGciOiJSUz...   ← copy this
+#
+#   Next step — paste it into IronClaw:
+#     ironclaw tool auth zencoder-tool
 ```
 
 **Windows (PowerShell):**
@@ -157,48 +163,45 @@ The repo ships `scripts/zencoder-auth.sh` (bash) and `scripts/zencoder-auth.ps1`
 
 The bash script falls back through `jq` → `python3` → `python` → `sed` to parse the response, so `jq` is recommended but not required. The PowerShell script uses `Invoke-RestMethod` and has no extra dependencies.
 
-Useful flags (both scripts):
+Useful flags (bash / PowerShell):
 
 | Flag | Purpose |
 |---|---|
-| `--print-only` (bash) / `-PrintOnly` (ps1) | Print the JWT and skip `ironclaw secret set` — useful on machines without IronClaw, or for piping into `ssh remote-host ironclaw secret set …`. |
 | `--client-id ID` / `-ClientId ID` | Skip the Client ID prompt (e.g. for CI). |
 | `--client-secret SECRET` / `-ClientSecret <SecureString>` | Skip the Client Secret prompt. **Avoid in interactive shells** — leaks into history / process list. |
-| `--secret-name NAME` / `-SecretName NAME` | Write under a different IronClaw secret name (default: `zencoder_access_token`). |
 | `--token-url URL` / `-TokenUrl URL` | Override the OAuth endpoint (e.g. for a staging tenant). |
 
-#### Manual fallback (no helper)
-
-If you'd rather run the exchange by hand:
+**Step 3 — paste the JWT into IronClaw:**
 
 ```bash
-read -rp "Client ID: " ZENCODER_CLIENT_ID
+ironclaw tool auth zencoder-tool
+```
+
+At the prompt:
+- Press **`s`** to skip the "open browser" step (required on headless containers — there is no `xdg-open`)
+- **Paste the token** printed by the helper when asked `Paste your token:`
+- IronClaw validates it against `GET https://api.zencoder.ai/api/v1/projects` and reports `✓` or `✗`
+
+#### Manual fallback (no helper script)
+
+If you prefer the exchange by hand (requires `jq`):
+
+```bash
+read -rp  "Client ID: "     ZENCODER_CLIENT_ID
 read -rsp "Client Secret: " ZENCODER_CLIENT_SECRET && echo
 
-# Build the JSON body with jq's --arg so the credentials are properly
-# escaped (a literal `"` or `\` in the secret would otherwise break the
-# body or, worse, inject extra JSON keys). Pipe straight into
-# `ironclaw secret set --stdin` so the JWT never lands on the command
-# line — argv is visible to other users via `ps`/`/proc`.
 BODY=$(jq -nc --arg id "$ZENCODER_CLIENT_ID" --arg sec "$ZENCODER_CLIENT_SECRET" \
   '{client_id:$id, client_secret:$sec, grant_type:"client_credentials"}')
 
-curl -fsS -X POST https://fe.zencoder.ai/oauth/token \
+JWT=$(curl -fsS -X POST https://fe.zencoder.ai/oauth/token \
   -H 'Content-Type: application/json' \
-  --data-binary "$BODY" \
-| jq -r .access_token \
-| ironclaw secret set zencoder_access_token --stdin
+  --data-binary "$BODY" | jq -r .access_token)
 
 unset BODY ZENCODER_CLIENT_ID ZENCODER_CLIENT_SECRET
+echo "$JWT"   # copy the token printed here
 ```
 
-> If your IronClaw build does not yet accept `--stdin`, capture the JWT to
-> a variable and pass it positionally — but be aware the token is then
-> briefly visible in `ps`:
->
-> ```bash
-> JWT=$(... | jq -r .access_token); ironclaw secret set zencoder_access_token "$JWT"; unset JWT
-> ```
+Then paste it via `ironclaw tool auth zencoder-tool` as in Step 3 above.
 
 PowerShell equivalent:
 
@@ -206,41 +209,16 @@ PowerShell equivalent:
 $cid = Read-Host 'Client ID'
 $sec = Read-Host 'Client Secret' -AsSecureString
 $secPlain = [System.Net.NetworkCredential]::new('', $sec).Password
-$body = @{ client_id = $cid; client_secret = $secPlain; grant_type = 'client_credentials' } | ConvertTo-Json
+$body = @{ client_id = $cid; client_secret = $secPlain; grant_type = 'client_credentials' } | ConvertTo-Json -Compress
 $resp = Invoke-RestMethod -Uri 'https://fe.zencoder.ai/oauth/token' -Method Post -ContentType 'application/json' -Body $body
-ironclaw secret set zencoder_access_token $resp.access_token
+$resp.access_token   # copy and paste into: ironclaw tool auth zencoder-tool
 ```
 
 `cmd.exe` has no JSON-friendly quoting — use PowerShell, WSL, or the helper script.
 
-### 8. Validate the token (optional)
+To rotate after expiry (the JWT lives ~24h), re-run the helper script and repeat Step 3.
 
-The helper script already writes the JWT into IronClaw, so the tool is ready to use. If you want IronClaw to *probe* the token before you start chatting, run:
-
-```bash
-ironclaw tool auth zencoder-tool
-```
-
-This reads the setup instructions from the capabilities manifest, lets you re-paste the token (press Enter to keep the existing one), then calls `GET https://api.zencoder.ai/api/v1/projects` and reports `200`/`401`. On a **headless container** without a browser, press `s` (skip) at the "open setup page" prompt — IronClaw won't crash on the missing `xdg-open`.
-
-For CI / non-interactive setups you can pre-populate the token via env-var instead of the secret store; IronClaw picks it up first:
-
-```bash
-export ZENCODER_ACCESS_TOKEN=<your-jwt>
-ironclaw tool auth zencoder-tool   # validates ZENCODER_ACCESS_TOKEN
-```
-
-To rotate after expiry (the JWT lives ~24h), just re-run the helper script.
-
-> **Upgrading from an older install?** Earlier versions of this tool stored `zencoder_client_id` and `zencoder_client_secret` as IronClaw secrets. They are no longer used. Clean them up with:
->
-> ```bash
-> ironclaw secret unset zencoder_client_id
-> ironclaw secret unset zencoder_client_secret
-> ironclaw secret unset zencoder_api_key   # only if you ever set it
-> ```
-
-### 9. Verify the installation
+### 8. Verify the installation
 
 ```bash
 ironclaw tool list
