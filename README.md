@@ -104,13 +104,6 @@ ironclaw tool install \
   --skip-build
 ```
 
-Alternatively, install directly from the source directory (IronClaw builds it for you):
-
-```bash
-cd ..  # back to zencoder-ironclaw-integration/
-ironclaw tool install ./zencoder-tool
-```
-
 > **Already installed?** IronClaw refuses to overwrite an existing tool unless you pass `--force`. To upgrade after a `git pull`, either pass `--force` to the install commands above, or remove the previous copy first:
 >
 > ```bash
@@ -120,7 +113,7 @@ ironclaw tool install ./zencoder-tool
 > (The subcommand is `remove`, not `uninstall` — IronClaw 0.25/0.26 does not register `uninstall` as an alias.) After remove + reinstall, confirm the new build is live:
 >
 > ```bash
-> ironclaw tool info zencoder-tool | head -5
+> ironclaw tool info zencoder-tool
 > # Hash should change every time the wasm or capabilities JSON changes.
 > ```
 
