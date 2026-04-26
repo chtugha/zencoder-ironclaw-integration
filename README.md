@@ -111,6 +111,19 @@ cd ..  # back to zencoder-ironclaw-integration/
 ironclaw tool install ./zencoder-tool
 ```
 
+> **Already installed?** IronClaw refuses to overwrite an existing tool unless you pass `--force`. To upgrade after a `git pull`, either pass `--force` to the install commands above, or remove the previous copy first:
+>
+> ```bash
+> ironclaw tool remove zencoder-tool   # deletes wasm + capabilities sidecar
+> ```
+>
+> (The subcommand is `remove`, not `uninstall` — IronClaw 0.25/0.26 does not register `uninstall` as an alias.) After remove + reinstall, confirm the new build is live:
+>
+> ```bash
+> ironclaw tool info zencoder-tool | head -5
+> # Hash should change every time the wasm or capabilities JSON changes.
+> ```
+
 ### 7. Obtain a Zencoder access token
 
 IronClaw does **not** currently implement the OAuth2 `client_credentials` grant — its built-in `ironclaw tool auth` flow only supports the authorization-code (browser redirect) and "paste-the-token" flows. Zencoder's `https://fe.zencoder.ai/oauth/token` only speaks `client_credentials`. So the token exchange has to happen on your shell, **then** the resulting JWT is handed to IronClaw.
