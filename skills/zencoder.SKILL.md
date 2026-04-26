@@ -1,8 +1,14 @@
 ---
 name: zencoder
-version: "1.2.0"
-description: Routes Zencoder/Zenflow operations through the zencoder-tool WASM extension. Takes precedence over generic coding, delegation, and plan-mode skills whenever a Zencoder entity is in scope. Falls back to native IronClaw skills when Zencoder is unreachable (401/402/429/5xx/network/missing tool) and resumes via lazy probing once it recovers.
+version: "1.3.0"
+description: Routes Zencoder/Zenflow operations through the zencoder-tool WASM extension. Takes precedence over generic coding, delegation, and plan-mode skills when a Zencoder entity is in scope; composes with native commitment, review, planning, and project-setup skills without overriding their downstream wiring. Falls back to native skills on 401/402/429/5xx/network/missing-tool and resumes via lazy probing.
 activation:
+  # IronClaw enforces MAX_KEYWORDS_PER_SKILL=20 and MAX_PATTERNS_PER_SKILL=5
+  # (per the commitment-triage skill's frontmatter comment). Entries past
+  # those caps are silently dropped at parse time, so the lists below are
+  # deliberately trimmed to the caps. Brand terms and the canonical
+  # tool-action names are kept; less-specific verb pairs are covered by
+  # patterns instead of individual keywords.
   keywords:
     - "zencoder"
     - "zenflow"
@@ -10,34 +16,18 @@ activation:
     - "solve_coding_problem"
     - "check_solution_status"
     - "list_projects"
-    - "get_project"
     - "create_task"
     - "list_tasks"
-    - "get_task"
     - "update_task"
-    - "list_workflows"
     - "get_plan"
-    - "create_plan"
     - "update_plan_step"
-    - "add_plan_steps"
-    - "list_automations"
     - "create_automation"
-    - "toggle_automation"
-    - "list_task_automations"
     - "delegate to zencoder"
     - "delegate to zenflow"
-    - "have zencoder"
-    - "have zenflow"
-    - "ask zencoder"
-    - "ask zenflow"
-    - "tell zencoder"
-    - "tell zenflow"
     - "zencoder task"
     - "zenflow task"
     - "zencoder project"
     - "zenflow project"
-    - "remote agent"
-    - "fe.zencoder.ai"
     - "api.zencoder.ai"
     - "auth.zencoder.ai"
   patterns:
@@ -45,9 +35,7 @@ activation:
     - "(?i)(delegate|hand[- ]off|send|push|forward)\\s.*(to|on)\\s+zen(coder|flow)"
     - "(?i)(have|let|ask|tell|get)\\s+zen(coder|flow)"
     - "(?i)solve[_ ]coding[_ ]problem"
-    - "(?i)check[_ ]solution[_ ]status"
     - "(?i)zen(coder|flow)\\s+(project|task|plan|workflow|automation|branch|status)"
-    - "(?i)(project|task|plan)[_ ]id\\s*[:=]?\\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
   tags:
     - "zencoder"
     - "zenflow"
@@ -125,6 +113,71 @@ workflow, automation) or that names the `zencoder-tool` action set:
 If none of the listed native skills are present in the prompt, the
 clauses above are simply no-ops — this skill remains fully functional
 on its own.
+
+## Composition with other native IronClaw skills
+
+The native skills below have downstream side-effects (Health Score
+updates, signals written to `projects/commitments/signals/pending/`,
+7-day outcome reminders, `context/intel/` writes, pacing logic) that
+would be silently lost if this skill simply overrode them. For each,
+**compose** rather than override — let the native skill run its
+bookkeeping, then mirror the relevant state to/from Zencoder.
+
+If a listed native skill is **not** loaded, the matching rule below
+becomes a no-op; nothing in this skill depends on a native skill
+existing.
+
+- **`delegation-tracker`** — when the user delegates work to Zencoder
+  via `solve_coding_problem`, also let `delegation-tracker` log the
+  hand-off to its standard ledger. The remote `task_id` should be
+  recorded in the tracker entry's `external_ref` (or comparable) field
+  so the 7-day outcome reminder can resolve to a `check_solution_status`
+  call.
+- **`commitment-triage`** — Mode B only (lightweight): a Zencoder task
+  is the canonical record. Do **not** create a parallel
+  `projects/commitments/open/<slug>.md` file when a `task_id` exists.
+  When Zencoder is degraded (see the resilience section), fall back to
+  Mode A and tag the local commitment with `pending_zencoder_sync: true`.
+- **`qa-review`** — only run automatically when the native QA scorer
+  reports a score `< 80`, or when the user opts in. On trigger, attach
+  the QA findings to the Zencoder task description via `update_task`
+  rather than creating a separate review document.
+- **`security-review`** — always run for P1 (production / customer
+  data). For P2/P3 it is opt-in. Findings are attached to the Zencoder
+  task via `update_task` — never duplicated as a separate file.
+- **`routine-advisor`** — only takes precedence over `create_automation`
+  when the routine subject is **not** a Zencoder operation. If the user
+  asks for a recurring Zencoder action, prefer `create_automation`; the
+  routine advisor's local cron entry would be redundant.
+- **`decision-capture`** — when a decision is captured during Zencoder
+  work, append a one-line summary (decision + rationale) to the task
+  description via `update_task`. Do not move the canonical decision
+  record off the native skill.
+- **`tech-debt-tracker`** — only auto-trigger for high-severity debt or
+  when the user opts in. When triggered, link the tech-debt entry to
+  the Zencoder task by setting the entry's external reference to the
+  `task_id`.
+- **`new-project`** / **`project-setup`** — never auto-link a local
+  setup to a Zencoder project. Require an exact name match **and**
+  explicit user confirmation before associating the new local project
+  with an existing `project_id`. Fuzzy matches are surfaced as
+  candidates only.
+- **`review-readiness`** — propagate one-way only: Zencoder task status
+  `inreview` should mark the local readiness checklist as ready; do
+  **not** push local readiness state back into Zencoder.
+- **`commitment-digest`** — when the digest runs, add a
+  "Zencoder in-progress" section sourced from `list_tasks`
+  with `status=inprogress`. Render it alongside the native sections
+  rather than replacing them.
+- **`product-prioritization`** — never invoke automatically. If the
+  user asks to (re)prioritize a Zencoder task, ask first ("update the
+  Zencoder task priority, the local prioritization model, or both?")
+  and act on the answer.
+- **`github-workflow`** — compose with `create_task_automation`: a PR
+  monitor created via `create_task_automation` is the source of truth.
+  Let `github-workflow` provide the local event-driven mission
+  scaffolding; the Zencoder automation is what actually runs the
+  recurring agent.
 
 ## Decision guidance
 
