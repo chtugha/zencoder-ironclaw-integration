@@ -175,18 +175,30 @@ If you'd rather run the exchange by hand:
 read -rp "Client ID: " ZENCODER_CLIENT_ID
 read -rsp "Client Secret: " ZENCODER_CLIENT_SECRET && echo
 
-# Single-quoted JSON keeps smart-quote autocorrect from breaking the body
-# (otherwise the server replies {"errors":["Invalid input json"], ...}).
-# The '"$VAR"' pattern closes single quotes, splices the variable, reopens.
-ironclaw secret set zencoder_access_token "$(
-  curl -fsS -X POST https://fe.zencoder.ai/oauth/token \
-    -H 'Content-Type: application/json' \
-    -d '{"client_id":"'"$ZENCODER_CLIENT_ID"'","client_secret":"'"$ZENCODER_CLIENT_SECRET"'","grant_type":"client_credentials"}' \
-  | jq -r .access_token
-)"
+# Build the JSON body with jq's --arg so the credentials are properly
+# escaped (a literal `"` or `\` in the secret would otherwise break the
+# body or, worse, inject extra JSON keys). Pipe straight into
+# `ironclaw secret set --stdin` so the JWT never lands on the command
+# line — argv is visible to other users via `ps`/`/proc`.
+BODY=$(jq -nc --arg id "$ZENCODER_CLIENT_ID" --arg sec "$ZENCODER_CLIENT_SECRET" \
+  '{client_id:$id, client_secret:$sec, grant_type:"client_credentials"}')
 
-unset ZENCODER_CLIENT_ID ZENCODER_CLIENT_SECRET
+curl -fsS -X POST https://fe.zencoder.ai/oauth/token \
+  -H 'Content-Type: application/json' \
+  --data-binary "$BODY" \
+| jq -r .access_token \
+| ironclaw secret set zencoder_access_token --stdin
+
+unset BODY ZENCODER_CLIENT_ID ZENCODER_CLIENT_SECRET
 ```
+
+> If your IronClaw build does not yet accept `--stdin`, capture the JWT to
+> a variable and pass it positionally — but be aware the token is then
+> briefly visible in `ps`:
+>
+> ```bash
+> JWT=$(... | jq -r .access_token); ironclaw secret set zencoder_access_token "$JWT"; unset JWT
+> ```
 
 PowerShell equivalent:
 

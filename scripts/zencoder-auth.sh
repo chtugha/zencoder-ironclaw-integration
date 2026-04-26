@@ -102,10 +102,23 @@ extract_json_field() {
             jq -r --arg f "$1" '.[$f] // empty'
             ;;
         python3|python)
-            "$JSON_EXTRACTOR" -c "import json,sys; d=json.load(sys.stdin); print(d.get('$1','') if isinstance(d,dict) else '')"
+            # Pass the field name via argv (sys.argv[1]) instead of
+            # interpolating it into the source — prevents quote-injection
+            # if the field name ever becomes user-controlled.
+            "$JSON_EXTRACTOR" -c 'import json,sys
+d=json.load(sys.stdin)
+v=d.get(sys.argv[1],"") if isinstance(d,dict) else ""
+print("" if v is None else v)' "$1"
             ;;
         sed)
-            sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n1
+            # Match either a JSON string ("...") or a JSON number/boolean
+            # (bare token). The first capture group wins.
+            input=$(cat)
+            val=$(printf '%s' "$input" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" | head -n1)
+            if [ -z "$val" ]; then
+                val=$(printf '%s' "$input" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" | head -n1)
+            fi
+            printf '%s' "$val"
             ;;
     esac
 }
@@ -157,7 +170,10 @@ fi
 # directly into single-quoted curl args, so users can't be tripped up by
 # special characters in the secret.
 build_json_body() {
-    if command -v python3 >/dev/null 2>&1; then
+    if command -v jq >/dev/null 2>&1; then
+        jq -nc --arg id "$CLIENT_ID" --arg sec "$CLIENT_SECRET" \
+            '{client_id:$id, client_secret:$sec, grant_type:"client_credentials"}'
+    elif command -v python3 >/dev/null 2>&1; then
         python3 -c '
 import json, sys
 print(json.dumps({
@@ -167,7 +183,18 @@ print(json.dumps({
 }))
 ' "$CLIENT_ID" "$CLIENT_SECRET"
     else
-        # Best-effort escape: backslash-escape backslashes and double quotes.
+        # Last-resort sed escaper. JSON forbids U+0000–U+001F inside string
+        # literals; if the credentials contain any control character (CR
+        # from a Windows clipboard paste, embedded newline, tab, …) we
+        # cannot construct a valid body without proper escaping. Refuse
+        # rather than send malformed JSON the server will reject as
+        # ER-00006 ("Invalid input json").
+        if printf '%s%s' "$CLIENT_ID" "$CLIENT_SECRET" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+            echo "ERROR: Client ID/Secret contains a control character (CR, LF, tab, …)." >&2
+            echo "       Cannot construct safe JSON without jq or python3 — install one of:" >&2
+            echo "         apt install -y jq        # or python3" >&2
+            exit 1
+        fi
         local id sec
         id=$(printf '%s' "$CLIENT_ID"     | sed 's/\\/\\\\/g; s/"/\\"/g')
         sec=$(printf '%s' "$CLIENT_SECRET" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -220,7 +247,11 @@ if [ "$PRINT_ONLY" -eq 1 ]; then
 fi
 
 if ! printf '%s' "$ACCESS_TOKEN" | ironclaw secret set "$SECRET_NAME" --stdin >/dev/null 2>&1; then
-    # Fallback: not every IronClaw build supports --stdin. Try positional.
+    # Fallback: not every IronClaw build supports --stdin. Try positional,
+    # but warn loudly first — argv is visible in the OS process list.
+    echo "WARNING: Falling back to positional 'ironclaw secret set $SECRET_NAME <token>'." >&2
+    echo "         Your IronClaw build does not accept --stdin; the JWT will be briefly" >&2
+    echo "         visible in 'ps' / process listings. Upgrade IronClaw to avoid this." >&2
     if ! ironclaw secret set "$SECRET_NAME" "$ACCESS_TOKEN" >/dev/null 2>&1; then
         echo "ERROR: 'ironclaw secret set $SECRET_NAME ...' failed." >&2
         echo "       Token (copy this and set it manually):" >&2

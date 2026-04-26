@@ -8,6 +8,24 @@ use serde::Deserialize;
 const MAX_TEXT_LENGTH: usize = 65536;
 const API_BASE_URL: &str = "https://api.zencoder.ai";
 
+const MAX_HTTP_ATTEMPTS: u32 = 3;
+const HTTP_TIMEOUT_MS: u32 = 30_000;
+const RATE_LIMIT_WARN_THRESHOLD: u32 = 10;
+const ERROR_BODY_PREVIEW_CHARS: usize = 500;
+
+const UUID_LEN: usize = 36;
+const UUID_SEGMENT_LENS: [usize; 5] = [8, 4, 4, 4, 12];
+
+const SCHEDULE_TIME_LEN: usize = 5;
+const HOUR_MAX: u32 = 23;
+const MINUTE_MAX: u32 = 59;
+const DAY_OF_WEEK_MAX: u8 = 6;
+
+const TITLE_MAX_CHARS: usize = 100;
+const TITLE_MIN_WORD_BREAK: usize = 10;
+
+const DEFAULT_WORKFLOW_ID: &str = "default-auto-workflow";
+
 fn validate_input_length(s: &str, field_name: &str) -> Result<(), String> {
     if s.chars().count() > MAX_TEXT_LENGTH {
         return Err(format!(
@@ -19,23 +37,24 @@ fn validate_input_length(s: &str, field_name: &str) -> Result<(), String> {
 }
 
 fn validate_uuid(s: &str, field_name: &str) -> Result<(), String> {
-    if s.len() != 36 {
+    if s.len() != UUID_LEN {
         return Err(format!(
-            "Invalid {}: expected 36 characters, got {}",
+            "Invalid {}: expected {} characters, got {}",
             field_name,
+            UUID_LEN,
             s.len()
         ));
     }
     let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 5 {
+    if parts.len() != UUID_SEGMENT_LENS.len() {
         return Err(format!(
-            "Invalid {}: expected 5 dash-separated segments, got {}",
+            "Invalid {}: expected {} dash-separated segments, got {}",
             field_name,
+            UUID_SEGMENT_LENS.len(),
             parts.len()
         ));
     }
-    let expected = [8, 4, 4, 4, 12];
-    for (part, &len) in parts.iter().zip(&expected) {
+    for (part, &len) in parts.iter().zip(&UUID_SEGMENT_LENS) {
         if part.len() != len {
             return Err(format!(
                 "Invalid {}: segment '{}' has length {}, expected {}",
@@ -76,7 +95,7 @@ fn validate_step_status(s: &str) -> Result<(), String> {
 }
 
 fn validate_schedule_time(s: &str) -> Result<(), String> {
-    if !s.is_ascii() || s.len() != 5 {
+    if !s.is_ascii() || s.len() != SCHEDULE_TIME_LEN {
         return Err(format!(
             "Invalid schedule_time '{}': must be HH:MM format (ASCII)",
             s
@@ -95,11 +114,14 @@ fn validate_schedule_time(s: &str) -> Result<(), String> {
     let minute: u32 = s[3..5]
         .parse()
         .map_err(|_| format!("Invalid minute in '{}'", s))?;
-    if hour > 23 {
-        return Err(format!("Invalid hour {}: must be 0-23", hour));
+    if hour > HOUR_MAX {
+        return Err(format!("Invalid hour {}: must be 0-{}", hour, HOUR_MAX));
     }
-    if minute > 59 {
-        return Err(format!("Invalid minute {}: must be 0-59", minute));
+    if minute > MINUTE_MAX {
+        return Err(format!(
+            "Invalid minute {}: must be 0-{}",
+            minute, MINUTE_MAX
+        ));
     }
     Ok(())
 }
@@ -109,10 +131,10 @@ fn validate_days_of_week(days: &[u8]) -> Result<(), String> {
         return Err("schedule_days_of_week must contain at least one day".into());
     }
     for &d in days {
-        if d > 6 {
+        if d > DAY_OF_WEEK_MAX {
             return Err(format!(
-                "Invalid day_of_week {}: must be 0 (Sun) - 6 (Sat)",
-                d
+                "Invalid day_of_week {}: must be 0 (Sun) - {} (Sat)",
+                d, DAY_OF_WEEK_MAX
             ));
         }
     }
@@ -123,7 +145,7 @@ fn url_encode_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 2);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(b as char);
             }
             _ => {
@@ -289,9 +311,11 @@ impl exports::near::agent::tool::Guest for ZencoderTool {
         "Zencoder/Zenflow integration for managing projects, tasks, plans, workflows, and \
          automations. Delegate complex coding problems to Zenflow's AI agents and track their \
          progress. Authentication uses a Zencoder JWT access token — obtain one via the OAuth2 \
-         client_credentials exchange at https://fe.zencoder.ai/oauth/token, then run \
-         'ironclaw tool auth zencoder-tool' (or 'ironclaw secret set zencoder_access_token <jwt>') \
-         to install it."
+         client_credentials exchange at https://fe.zencoder.ai/oauth/token, then install it \
+         with the bundled helper (`scripts/zencoder-auth.sh` / `.ps1`) or via \
+         'ironclaw tool auth zencoder-tool' (interactive paste-the-JWT prompt). To avoid \
+         leaking the token through shell history / process list, prefer piping it: \
+         `printf %s '<jwt>' | ironclaw secret set zencoder_access_token --stdin`."
             .to_string()
     }
 }
@@ -308,15 +332,20 @@ const AUTH_NOT_CONFIGURED_ERROR: &str = "Zencoder access token not configured.
 
 1. Generate a personal access token at https://auth.zencoder.ai (Administration > Settings > Personal Tokens) and copy the Client ID + Client Secret.
 
-2. Exchange them for a JWT access token:
+2. Run the bundled helper, which prompts for the credentials, exchanges them, and installs the JWT for you (avoids leaking the token via shell history / process list):
+
+     scripts/zencoder-auth.sh           # bash / zsh
+     scripts\\zencoder-auth.ps1          # PowerShell
+
+   Or do the OAuth2 client_credentials exchange manually with curl:
 
      curl -s -X POST https://fe.zencoder.ai/oauth/token \\
        -H 'Content-Type: application/json' \\
        -d '{\"client_id\":\"<ID>\",\"client_secret\":\"<SECRET>\",\"grant_type\":\"client_credentials\"}'
 
-3. Install the access_token value with either:
+3. Install the access_token value WITHOUT putting it on the command line:
 
-     ironclaw secret set zencoder_access_token <jwt>
+     printf %s '<jwt>' | ironclaw secret set zencoder_access_token --stdin
 
    or (interactive paste-the-JWT prompt with validation):
 
@@ -332,8 +361,15 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
 
     let body_bytes = body.map(|b| b.into_bytes());
 
-    let max_attempts = 3;
-    let mut attempt = 0;
+    // Only retry methods that the Zencoder API treats as idempotent. Retrying
+    // POST/PATCH on a transport error or 5xx can produce duplicate writes
+    // (e.g. two created tasks, two scheduled automations) because the server
+    // may have already accepted the first request before the response was
+    // lost. Without a sleep primitive in WASM we also cannot back off, which
+    // makes the duplicate-write window microseconds wide.
+    let is_idempotent = matches!(method, "GET" | "HEAD" | "OPTIONS");
+    let max_attempts: u32 = if is_idempotent { MAX_HTTP_ATTEMPTS } else { 1 };
+    let mut attempt: u32 = 0;
 
     loop {
         attempt += 1;
@@ -343,7 +379,7 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
             &url,
             &headers.to_string(),
             body_bytes.as_deref(),
-            Some(30_000u32),
+            Some(HTTP_TIMEOUT_MS),
         );
 
         match response {
@@ -357,7 +393,7 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                         .and_then(|v| v.as_str())
                     {
                         if let Ok(count) = remaining.parse::<u32>() {
-                            if count < 10 {
+                            if count < RATE_LIMIT_WARN_THRESHOLD {
                                 near::agent::host::log(
                                     near::agent::host::LogLevel::Warn,
                                     &format!("Zencoder API rate limit low: {} remaining", count),
@@ -386,7 +422,7 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                         }
                     }
                     return Err(err_msg);
-                } else if attempt < max_attempts && resp.status >= 500 {
+                } else if is_idempotent && attempt < max_attempts && resp.status >= 500 {
                     let msg = format!(
                         "Zencoder API error {} (attempt {}/{}). Retrying...",
                         resp.status, attempt, max_attempts
@@ -396,22 +432,35 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                 } else if resp.status == 401 {
                     return Err(
                         "Zencoder API returned 401 Unauthorized. Your access token may have \
-                         expired. Obtain a fresh JWT via the curl exchange against \
-                         https://fe.zencoder.ai/oauth/token and reinstall it with:\n\
-                         \n  ironclaw tool auth zencoder-tool\n\
-                         \n(or: ironclaw secret set zencoder_access_token <jwt>)"
+                         expired. Obtain a fresh JWT via the bundled helper \
+                         (`scripts/zencoder-auth.sh` / `.ps1`) or by repeating the OAuth2 \
+                         client_credentials curl exchange against \
+                         https://fe.zencoder.ai/oauth/token, then reinstall it with:\n\
+                         \n  printf %s '<jwt>' | ironclaw secret set zencoder_access_token --stdin\n\
+                         \n(or interactive: ironclaw tool auth zencoder-tool)"
                             .into(),
                     );
                 } else {
-                    let err_msg = format!(
-                        "Zencoder API returned status {}. Check your credentials and parameters.",
-                        resp.status
-                    );
+                    let body_preview: String = String::from_utf8_lossy(&resp.body)
+                        .chars()
+                        .take(ERROR_BODY_PREVIEW_CHARS)
+                        .collect();
+                    let err_msg = if body_preview.is_empty() {
+                        format!(
+                            "Zencoder API returned status {}. Check your credentials and parameters.",
+                            resp.status
+                        )
+                    } else {
+                        format!(
+                            "Zencoder API returned status {}: {}",
+                            resp.status, body_preview
+                        )
+                    };
                     return Err(err_msg);
                 }
             }
             Err(e) => {
-                if attempt < max_attempts {
+                if is_idempotent && attempt < max_attempts {
                     near::agent::host::log(
                         near::agent::host::LogLevel::Warn,
                         &format!(
@@ -422,8 +471,8 @@ fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String,
                     continue;
                 }
                 return Err(format!(
-                    "HTTP request failed after {} attempts: {}",
-                    max_attempts, e
+                    "HTTP request failed after {} attempt(s) [{}]: {}",
+                    attempt, method, e
                 ));
             }
         }
@@ -892,19 +941,18 @@ fn handle_list_task_automations(project_id: String, task_id: String) -> Result<S
 }
 
 fn derive_title(description: &str) -> String {
-    let max_len = 100;
-    if description.chars().count() <= max_len {
+    if description.chars().count() <= TITLE_MAX_CHARS {
         return description.to_string();
     }
     let byte_limit = description
         .char_indices()
-        .nth(max_len)
+        .nth(TITLE_MAX_CHARS)
         .map(|(idx, _)| idx)
         .unwrap_or(description.len());
     let truncated = &description[..byte_limit];
     match truncated.rfind(' ') {
-        // Only break at word boundary if it keeps at least 10 chars, to avoid extremely short titles
-        Some(pos) if pos > 10 => format!("{}...", &truncated[..pos]),
+        // Only break at word boundary if it keeps a reasonable title length.
+        Some(pos) if pos > TITLE_MIN_WORD_BREAK => format!("{}...", &truncated[..pos]),
         _ => format!("{}...", truncated),
     }
 }
@@ -920,9 +968,12 @@ fn handle_solve_coding_problem(
         return Err("description must not be empty".into());
     }
     validate_input_length(trimmed, "description")?;
+    if let Some(ref w) = workflow_id {
+        validate_input_length(w, "workflow_id")?;
+    }
 
     let title = derive_title(trimmed);
-    let wf = workflow_id.unwrap_or_else(|| "default-auto-workflow".to_string());
+    let wf = workflow_id.unwrap_or_else(|| DEFAULT_WORKFLOW_ID.to_string());
 
     let body = serde_json::json!({
         "title": title,
@@ -974,11 +1025,16 @@ fn handle_check_solution_status(project_id: String, task_id: String) -> Result<S
         .map_err(|e| format!("Failed to parse task response: {}", e))?;
 
     let task_data = task_json.get("data").unwrap_or(&task_json);
-    let task_status = task_data
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
+    let task_status = match task_data.get("status").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            near::agent::host::log(
+                near::agent::host::LogLevel::Warn,
+                "Task response missing 'status' field — API response shape may have changed",
+            );
+            "unparseable".to_string()
+        }
+    };
 
     let branch = task_data
         .get("branch")
@@ -1036,9 +1092,9 @@ fn handle_check_solution_status(project_id: String, task_id: String) -> Result<S
         Err(e) => {
             near::agent::host::log(
                 near::agent::host::LogLevel::Warn,
-                &format!("Failed to fetch plan (treating as empty): {}", e),
+                &format!("Failed to fetch plan (returning unavailable status): {}", e),
             );
-            (Vec::new(), "0 of 0 steps completed".to_string())
+            (Vec::new(), format!("plan unavailable: {}", e))
         }
     };
 
@@ -1932,6 +1988,27 @@ mod tests {
                 msg
             );
         }
+    }
+
+    #[test]
+    fn test_url_encode_path_preserves_tilde() {
+        assert_eq!(url_encode_path("a~b"), "a~b");
+    }
+
+    #[test]
+    fn test_handle_solve_coding_problem_workflow_id_length_validated() {
+        let huge = "x".repeat(MAX_TEXT_LENGTH + 1);
+        let err = handle_solve_coding_problem(
+            "550e8400-e29b-41d4-a716-446655440000".into(),
+            "do something".into(),
+            Some(huge),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("workflow_id"),
+            "expected workflow_id length validation; got: {}",
+            err
+        );
     }
 
     #[test]
