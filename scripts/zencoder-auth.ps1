@@ -101,6 +101,7 @@ try {
 } catch { $setOk = $false }
 
 if (-not $setOk) {
+    Write-Warning "Falling back to positional 'ironclaw secret set <name> <token>'. The JWT will be briefly visible in the OS process list — upgrade IronClaw to a build supporting --stdin to avoid this."
     & ironclaw secret set $SecretName $token | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Error ("'ironclaw secret set $SecretName' failed. Token (set manually):`n{0}" -f $token)

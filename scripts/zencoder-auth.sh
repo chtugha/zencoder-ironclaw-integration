@@ -130,12 +130,16 @@ if [ -z "$CLIENT_SECRET" ]; then
         echo "ERROR: --client-secret not supplied and stdin is not a terminal." >&2
         exit 2
     fi
-    # Read with echo disabled.
+    # Read with echo disabled. A trap restores echo on Ctrl-C, kill, or any
+    # unexpected exit — without it `set -e` would leave the user's terminal
+    # in no-echo mode if they cancel the prompt.
     if [ -t 0 ] && stty -echo 2>/dev/null; then
+        restore_echo() { stty echo 2>/dev/null || true; printf '\n'; }
+        trap 'restore_echo' INT TERM HUP EXIT
         printf "Zencoder Client Secret: "
-        IFS= read -r CLIENT_SECRET || { stty echo; echo; exit 2; }
-        stty echo
-        echo
+        IFS= read -r CLIENT_SECRET || { trap - INT TERM HUP EXIT; restore_echo; exit 2; }
+        trap - INT TERM HUP EXIT
+        restore_echo
     else
         # Fallback for shells without stty.
         printf "Zencoder Client Secret (will be visible): "
