@@ -142,7 +142,7 @@ fn validate_days_of_week(days: &[u8]) -> Result<(), String> {
 }
 
 fn url_encode_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
+    let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
@@ -272,7 +272,7 @@ struct PlanStep {
     description: String,
 }
 
-#[derive(Deserialize, serde::Serialize)]
+#[derive(serde::Serialize)]
 struct PlanStepSummary {
     name: String,
     status: String,
@@ -349,10 +349,16 @@ const AUTH_NOT_CONFIGURED_ERROR: &str = "Zencoder access token not configured.
 fn api_request(method: &str, path: &str, body: Option<String>) -> Result<String, String> {
     let url = format!("{}{}", API_BASE_URL, path);
 
-    let headers = serde_json::json!({
-        "Content-Type": "application/json",
-        "User-Agent": "IronClaw-Zencoder-Tool"
-    });
+    let headers = if body.is_some() {
+        serde_json::json!({
+            "Content-Type": "application/json",
+            "User-Agent": "IronClaw-Zencoder-Tool"
+        })
+    } else {
+        serde_json::json!({
+            "User-Agent": "IronClaw-Zencoder-Tool"
+        })
+    };
 
     let body_bytes = body.map(|b| b.into_bytes());
 

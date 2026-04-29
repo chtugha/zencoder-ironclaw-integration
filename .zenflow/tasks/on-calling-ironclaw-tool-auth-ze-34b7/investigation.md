@@ -285,6 +285,67 @@ Files changed:
 - `zencoder-tool/src/lib.rs` — `AUTH_NOT_CONFIGURED_ERROR` and 401 handler
   updated to match new flow; two tests updated to assert against new content
 
+## Final audit pass (2026-04-29)
+
+Comprehensive codebase audit covering bugs, stubs, magic numbers, dead code,
+security issues, and WASM sandbox HTTP restriction compliance.
+
+### Fixes applied
+
+1. **`api_request` — `Content-Type: application/json` on bodyless requests**
+   (`lib.rs` lines 352-361): GET/HEAD/OPTIONS requests were sent with a
+   `Content-Type: application/json` header despite having no body. Strict
+   proxies or WAFs may reject this. Fixed: header map is now conditional —
+   `Content-Type` is only included when `body.is_some()`.
+
+2. **`url_encode_path` — undersized capacity hint** (`lib.rs` line 145):
+   `String::with_capacity(s.len() * 2)` was incorrect; worst case is 3x
+   (every byte → `%XX`). Changed to `s.len() * 3`.
+
+3. **`PlanStepSummary` — dead `Deserialize` derive** (`lib.rs` line 275):
+   This struct is only ever serialized (in `check_solution_status`), never
+   deserialized. Removed the unused `Deserialize` derive.
+
+4. **README.md — stale "API key" wording** (line 403): Security section
+   referred to "API key" but the tool uses a JWT access token. Fixed to
+   "access token".
+
+5. **README.md — wrong test count** (line 418): Stated "73 tests" but there
+   are 78. Updated to "78 tests" and line count to "2000+".
+
+### Items audited and confirmed correct
+
+- **WASM HTTP sandbox compliance**: all `api_request` calls use
+  `api.zencoder.ai` with methods `GET`, `POST`, `PATCH` only — matches
+  `capabilities.json` allowlist. No calls to `fe.zencoder.ai` or any
+  other host from WASM code. `fe.zencoder.ai` is only used by the helper
+  scripts which run outside the sandbox.
+- **`secret_exists` only** — no `secret_get` calls. Correct per WIT.
+- **Idempotent retry guard**: `is_idempotent` correctly limits retries to
+  `GET | HEAD | OPTIONS`. POST/PATCH run exactly once.
+- **Named constants**: all magic numbers extracted (`MAX_HTTP_ATTEMPTS`,
+  `HTTP_TIMEOUT_MS`, `RATE_LIMIT_WARN_THRESHOLD`, `ERROR_BODY_PREVIEW_CHARS`,
+  `UUID_LEN`, `UUID_SEGMENT_LENS`, `SCHEDULE_TIME_LEN`, `HOUR_MAX`,
+  `MINUTE_MAX`, `DAY_OF_WEEK_MAX`, `TITLE_MAX_CHARS`, `TITLE_MIN_WORD_BREAK`,
+  `MAX_TEXT_LENGTH`, `DEFAULT_WORKFLOW_ID`).
+- **URL encoding**: `url_encode_path` correctly preserves RFC 3986 unreserved
+  chars (A-Z, a-z, 0-9, `-`, `_`, `.`, `~`) and percent-encodes everything
+  else byte-by-byte, including multi-byte UTF-8.
+- **UUID validation**: strict 8-4-4-4-12 hex check prevents path traversal.
+- **Input length bounds**: all text fields checked against 64KB cap.
+- **`derive_title`**: multi-byte-safe char-boundary truncation with word
+  break heuristic. Tests cover edge cases.
+- **`capabilities.json`**: clean manual-token auth spec with validation
+  endpoint. No stale/bogus fields.
+- **Helper scripts**: jq→python3→sed fallback chain correct; stty trap
+  handles SIGINT/SIGTERM/HUP; control-char rejection in sed fallback;
+  no `ironclaw secret set` references remain.
+- **Skill v1.3.0**: keywords/patterns within IronClaw caps (20/5);
+  composition rules for 12+ native skills; resilience state machine
+  with lazy probe and exponential backoff.
+
 ## Test results
 
 * `cargo test` (workspace `zencoder-tool`): **78 passed; 0 failed; 0 ignored**
+* `cargo fmt --check`: clean
+* `cargo clippy --all --all-features`: clean

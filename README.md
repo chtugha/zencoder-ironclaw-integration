@@ -373,7 +373,7 @@ cargo clippy --target wasm32-wasip2 --all --all-features
 
 ## Security
 
-- The WASM sandbox never sees your API key — IronClaw injects it via credential injection
+- The WASM sandbox never sees your access token — IronClaw injects it via credential injection
 - HTTP requests are restricted to `api.zencoder.ai` with `GET`, `POST`, `PATCH` methods only (no `PUT` or `DELETE`)
 - All UUID inputs are validated before URL interpolation to prevent path traversal
 - All string inputs are length-bounded (64KB max)
@@ -388,7 +388,7 @@ zencoder-tool/
   Cargo.toml                          # Rust package config (cdylib WASM target)
   zencoder-tool.capabilities.json     # IronClaw capability manifest
   src/
-    lib.rs                            # All implementation (1800+ lines, 73 tests)
+    lib.rs                            # All implementation (2000+ lines, 78 tests)
 wit/
   tool.wit                            # near:agent@0.3.0 sandboxed-tool WIT interface
 ```
