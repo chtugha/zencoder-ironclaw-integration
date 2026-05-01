@@ -383,16 +383,17 @@ Replace `YOUR_CLIENT_ID` and `YOUR_CLIENT_SECRET` with your actual values. The o
 ironclaw tool auth zencoder-tool
 ```
 
-IronClaw will open an auth dialog. Follow these steps exactly:
+IronClaw will open an auth dialog. The exact sequence depends on your IronClaw version:
 
-1. When asked **"Open browser to authenticate?"** — press **`s`** to **skip** (there is no browser flow for Zencoder; pressing Enter or `y` on a headless machine will fail).
-2. When asked **"Paste your token:"** — paste the JWT you copied in Step 8b, then press **Enter**.
-3. IronClaw validates the token by making a test request to `https://api.zencoder.ai/api/v1/projects`. If it responds with HTTP 200, you will see a **✓** confirmation.
+- **If asked "Open browser to authenticate?"** — press **`s`** to **skip**. There is no browser flow for Zencoder; pressing Enter or `y` on a headless machine will fail. Some IronClaw versions skip this prompt entirely and go directly to token input.
+- **When asked "Paste your token:"** — paste the JWT you copied in Step 8b, then press **Enter**.
+
+IronClaw validates the token by making a test request to `https://api.zencoder.ai/api/v1/projects`. If it responds with HTTP 200, you will see a **✓** confirmation.
 
 If you see **✗** (validation failed):
 - Double-check you pasted the full JWT (it is a long string starting with `eyJ`).
 - Make sure there are no extra spaces or newlines.
-- Re-run the helper script to get a fresh token — JWTs expire after ~24 hours.
+- Re-run the helper script to get a fresh token — JWTs have a limited lifetime and may have expired.
 
 ---
 
@@ -441,12 +442,12 @@ ironclaw chat
 To confirm IronClaw picked up the skills, check the startup log for lines like:
 
 ```
-[INFO] Loaded skill 'coding' v1.0.0+zencoder.1 from workspace
-[INFO] Loaded skill 'code-review' v2.0.0+zencoder.1 from workspace
-[INFO] Loaded skill 'plan-mode' v0.1.0+zencoder.1 from workspace
-[INFO] Loaded skill 'commit' v1.0.0+zencoder.1 from workspace
-[INFO] Loaded skill 'delegation' v0.1.0+zencoder.1 from workspace
-[INFO] Loaded skill 'zencoder' v1.3.0+slim.1 from workspace
+[INFO] Loaded skill 'coding' 1.0.0+zencoder.1 from workspace
+[INFO] Loaded skill 'code-review' 2.0.0+zencoder.1 from workspace
+[INFO] Loaded skill 'plan-mode' 0.1.0+zencoder.1 from workspace
+[INFO] Loaded skill 'commit' 1.0.0+zencoder.1 from workspace
+[INFO] Loaded skill 'delegation' 0.1.0+zencoder.1 from workspace
+[INFO] Loaded skill 'zencoder' 1.3.0+slim.1 from workspace
 ```
 
 If you see these lines, the skill overrides are active.
@@ -741,7 +742,13 @@ Workspace installs (Option A) require no additional step — the skill files are
 
 ## Rotating Your Access Token
 
-Zencoder JWTs expire after approximately 24 hours. When the token expires, tool calls return HTTP 401 and IronClaw transitions to `degraded` state (it falls back to native skill behavior and warns you once per turn).
+Zencoder JWTs have a limited lifetime. When one expires, tool calls return HTTP 401 and IronClaw transitions to `degraded` state (it falls back to native skill behavior and warns you once per turn). To check when your current token expires, decode it:
+
+```bash
+echo '<your-jwt>' | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool | grep exp
+```
+
+The `exp` value is a Unix timestamp — convert it with `date -d @<exp>` (Linux) or `date -r <exp>` (macOS).
 
 To rotate:
 
@@ -767,7 +774,7 @@ cd zencoder-tool
 cargo test
 ```
 
-The test suite includes 78 unit tests covering all 17 actions, input validation, UUID parsing, and error handling.
+The test suite covers all 17 actions, input validation, UUID parsing, and error handling. The current count is printed in the summary line when you run the command.
 
 ### Lint and format
 
