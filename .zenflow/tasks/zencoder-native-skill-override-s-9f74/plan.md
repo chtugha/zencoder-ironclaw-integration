@@ -227,7 +227,7 @@ Both files declare `name: zencoder`. When both exist in the same directory level
 
 **Verification**: confirm `skills/zencoder.SKILL.md` no longer exists. Confirm `skills/zencoder/SKILL.md` exists. No other files modified.
 
-### [x] Step 9: Verify all files (byte count + YAML validation)
+### [x] Step 9: Verify all files (byte count + YAML validation) — re-verified after cross-review fixes
 <!-- chat-id: cd48f418-0476-41ba-9044-b1102a92b9dc -->
 
 Run the verification scripts defined in `spec.md` § "Verification Approach" and record results.
@@ -283,11 +283,12 @@ for skill in ['coding','code-review','plan-mode','commit','delegation','zencoder
 
 Record actual byte counts and pass/fail per skill in this plan file after running.
 
-**Results**:
-- `coding`: 3,250 bytes (limit 12,000) — PASS
-- `code-review`: 5,940 bytes (limit 20,000) — PASS
+**Results** (re-verified after cross-review fixes applied to `coding` and `code-review`):
+- `coding`: 3,342 bytes (limit 12,000) — PASS
+- `code-review`: 6,028 bytes (limit 20,000) — PASS
 - `plan-mode`: 5,152 bytes (limit 20,000) — PASS
 - `commit`: 2,266 bytes (limit 8,000) — PASS
 - `delegation`: 3,165 bytes (limit 12,000) — PASS
 - `zencoder`: 4,086 bytes (limit 8,000) — PASS
 - YAML validation: PASS (all 6 skills)
+- Structural checks: PASS (all keyword/pattern/tag counts correct, requires blocks correct, `"[PLAN MODE]"` properly quoted, monolith deleted)

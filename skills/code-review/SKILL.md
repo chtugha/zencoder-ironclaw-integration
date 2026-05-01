@@ -32,7 +32,7 @@ When `degraded` or `unavailable`: skip all Zencoder routing below and proceed di
 **Routing rules (healthy state only)**:
 
 1. If `task_id` in scope AND review relates to that task: complete review, then attach via `update_task` (PATCH replaces `description` entirely — call `get_task` first, prepend existing description, append `"\n\n## Code Review Findings\n" + findings`).
-2. User wants ongoing PR tracking: suggest `create_automation` instead of a one-off review.
+2. If the user says "track this PR", "monitor this PR", "remind me when this merges", or similar explicit tracking intent: suggest `create_automation` instead of a one-off review.
 3. Otherwise: fall through to native review behavior.
 
 ---

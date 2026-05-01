@@ -46,7 +46,7 @@ When `degraded` or `unavailable`: skip all Zencoder routing below and proceed di
 
 **Routing rules (healthy state only)**:
 
-1. If a `task_id` from a prior `zencoder-tool` response is present in this conversation: call `check_solution_status` before reaching for local edit primitives. Only use `apply_patch` / `read_file` / `write_file` when the user explicitly says "do it yourself" or when `check_solution_status` confirms no active remote task covers this work.
+1. If a `task_id` from a prior `zencoder-tool` response is present in this conversation: call `check_solution_status` (requires `project_id` + `task_id`; if `project_id` is unknown, call `list_projects` first) before reaching for local edit primitives. Only use `apply_patch` / `read_file` / `write_file` when the user explicitly says "do it yourself" or when `check_solution_status` confirms no active remote task covers this work.
 2. If no `task_id` is in scope AND the user explicitly signals delegation intent (e.g. "delegate this", "have zencoder fix this", "send this to zenflow"): call `solve_coding_problem`. If no `project_id` is known, call `list_projects` first. Do NOT proactively offer delegation on generic requests like "fix the bug" or "add a test" — those fall through to native behavior.
 3. All other cases: fall through to native behavior without any Zencoder call.
 
